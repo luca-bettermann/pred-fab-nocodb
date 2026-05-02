@@ -13,6 +13,7 @@ class Tables:
 
     STUDIES = "studies"
     EXPERIMENTS = "experiments"
+    DATASETS = "datasets"
     DIM_POSITIONS = "dim_positions"
     SET_STUDY_CONSTANTS = "set_study_constants"
     SET_EXP_PARAMS = "set_exp_params"
@@ -37,10 +38,23 @@ class ExperimentColumns:
     ID = "Id"
     CODE = "code"
     STUDIES = "studies"  # LinkToAnotherRecord -> studies
+    DATASET = "dataset"  # LinkToAnotherRecord -> datasets (nullable)
     STATUS = "status"
     STARTED_AT = "started_at"
     ENDED_AT = "ended_at"
     NOTES = "notes"
+
+
+class DatasetColumns:
+    """Columns on the `datasets` table."""
+
+    ID = "Id"
+    CODE = "code"
+    STUDY = "study"  # LinkToAnotherRecord -> studies
+    NAME = "name"
+    STRATEGY = "strategy"  # how experiments were generated
+    PURPOSE = "purpose"  # how they're used
+    DESCRIPTION = "description"
 
 
 class DimPositionColumns:
@@ -104,3 +118,21 @@ class Status(StrEnum):
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class Strategy(StrEnum):
+    """Dataset strategies — *how* experiments are generated."""
+
+    GRID = "grid"
+    BASELINE = "baseline"
+    EXPLORATION = "exploration"
+    INFERENCE = "inference"
+
+
+class Purpose(StrEnum):
+    """Dataset purposes — *what* the experiments are used for."""
+
+    REFERENCE = "reference"
+    TRAIN = "train"
+    VALIDATION = "validation"
+    TEST = "test"

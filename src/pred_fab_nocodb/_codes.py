@@ -24,6 +24,11 @@ def make_dim_position_code(domain: str, depth: int, count: int) -> str:
     return f"{domain}.d{depth}.{count}"
 
 
+def make_dataset_code(study_code: str, dataset_name: str) -> str:
+    """Generate a `datasets.code`."""
+    return f"{study_code}/{dataset_name}"
+
+
 def make_study_constant_code(study_code: str, constant_code: str) -> str:
     """Generate a `set_study_constants.code`."""
     return f"{study_code}/{constant_code}"
