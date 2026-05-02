@@ -16,3 +16,19 @@ class ValidationError(NocoDBError):
 
 class ConflictError(NocoDBError):
     """A unique-constraint conflict (HTTP 409) — e.g. duplicate code or axes."""
+
+
+class SchemaMismatchError(NocoDBError):
+    """The schema stored in NocoDB diverges from the expected schema.
+
+    Raised by `SchemaValidator.assert_compatible` and at `NocoDBClient` init
+    when an `expected_schema` is provided and doesn't match `studies.schema_json`.
+    """
+
+    def __init__(self, study_code: str, differences: list[str]):
+        self.study_code = study_code
+        self.differences = differences
+        super().__init__(
+            f"NocoDB schema for study {study_code!r} does not match expected; "
+            f"differences:\n  - " + "\n  - ".join(differences)
+        )

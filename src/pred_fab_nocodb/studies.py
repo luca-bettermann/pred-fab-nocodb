@@ -1,6 +1,7 @@
 """Studies table client."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -53,6 +54,27 @@ class StudiesClient(_BaseTableClient):
         result = self._http.records_create(self._table_id, body)
         # NocoDB's POST returns the created row including its assigned Id
         return self.get_by_code(code) if not isinstance(result, dict) else _row_to_study(result)
+
+    def push_schema(self, study_id: int, schema: dict[str, Any]) -> None:
+        """Write `schema` (serialised to JSON) into `studies.schema_json` for this study."""
+        self._http.records_update(
+            self._table_id,
+            {StudyColumns.ID: study_id, StudyColumns.SCHEMA: json.dumps(schema)},
+        )
+
+    def pull_schema(self, study_id: int) -> dict[str, Any] | None:
+        """Read and parse `studies.schema_json` for this study. Returns `None`
+        if the field is empty / unset."""
+        row = self._http.records_get(self._table_id, study_id)
+        raw = row.get(StudyColumns.SCHEMA)
+        if not raw:
+            return None
+        if isinstance(raw, dict):
+            return raw
+        try:
+            return json.loads(str(raw))
+        except (json.JSONDecodeError, TypeError):
+            return None
 
 
 def _row_to_study(row: dict[str, Any]) -> Study:

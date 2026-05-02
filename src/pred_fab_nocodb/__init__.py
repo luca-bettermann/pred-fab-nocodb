@@ -7,8 +7,10 @@ from .errors import (
     ConflictError,
     NocoDBError,
     NotFoundError,
+    SchemaMismatchError,
     ValidationError,
 )
+from .schema_validator import SchemaValidator
 from .experiments import Experiment
 from .schema import Purpose, Status, Strategy
 from .studies import Study
@@ -36,4 +38,6 @@ __all__ = [
     "NotFoundError",
     "ValidationError",
     "ConflictError",
+    "SchemaMismatchError",
+    "SchemaValidator",
 ]

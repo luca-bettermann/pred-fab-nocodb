@@ -1,6 +1,8 @@
 """Public entry point — `NocoDBClient` wires up every typed sub-client."""
 from __future__ import annotations
 
+from typing import Any
+
 from ._http import _NocoDBHttp
 from ._values import ValueClient
 from .datasets import DatasetsClient
@@ -13,6 +15,7 @@ from .schema import (
     ParamColumns,
     Tables,
 )
+from .schema_validator import SchemaValidator
 from .studies import StudiesClient
 from .study_constants import StudyConstantsClient
 from .workflows import WorkflowsClient
@@ -47,7 +50,15 @@ class NocoDBClient:
         api_token: str,
         base_id: str,
         timeout: float = 30.0,
+        study_code: str | None = None,
+        expected_schema: dict[str, Any] | None = None,
     ):
+        """Construct a NocoDB client.
+
+        If both `study_code` and `expected_schema` are supplied, the client
+        pulls `studies.schema_json` for that study at init and validates it
+        against `expected_schema`. Raises `SchemaMismatchError` on divergence.
+        """
         self._http = _NocoDBHttp(
             base_url=base_url,
             api_token=api_token,
@@ -98,6 +109,14 @@ class NocoDBClient:
 
         # Workflow helpers — composed from the above
         self.workflows = WorkflowsClient(self)
+
+        # Optional schema validation against the expected study schema
+        if study_code is not None and expected_schema is not None:
+            study = self.studies.get_by_code(study_code)
+            actual_schema = self.studies.pull_schema(study.id)
+            SchemaValidator.assert_compatible(
+                expected_schema, actual_schema, study_code=study_code,
+            )
 
     def close(self) -> None:
         self._http.close()
