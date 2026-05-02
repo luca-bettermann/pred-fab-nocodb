@@ -1,0 +1,39 @@
+# pred-fab-nocodb
+
+NocoDB binding for the pred-fab data model.
+
+## Purpose
+
+Typed read/write access to a NocoDB workspace structured per the pred-fab schema (studies, experiments, params, features, attributes, dim_positions). Consumers:
+
+- `learning-by-printing/` — pushes experiment results to NocoDB after a fab run
+- fabrication scripts — read parameters before running an experiment, update status during/after
+
+## Layout
+
+| Path | Contents |
+| ---- | -------- |
+| `src/pred_fab_nocodb/schema.py` | Table and column name constants, `Status` enum |
+| `src/pred_fab_nocodb/client.py` | Public `NocoDBClient` entry point |
+| `src/pred_fab_nocodb/errors.py` | Exception types |
+| `src/pred_fab_nocodb/_http.py` | HTTP wrapper (auth, error mapping) — internal |
+| `src/pred_fab_nocodb/_base.py` | `_BaseTableClient` shared base — internal |
+| `src/pred_fab_nocodb/_axes.py` | Axes canonicalisation + dim-position code generation |
+| `src/pred_fab_nocodb/_values.py` | `ValueClient` for params / features / attributes |
+| `src/pred_fab_nocodb/studies.py` | `StudiesClient` + `Study` dataclass |
+| `src/pred_fab_nocodb/experiments.py` | `ExperimentsClient` + `Experiment` dataclass |
+| `src/pred_fab_nocodb/dim_positions.py` | `DimPositionsClient` + `DimPosition` dataclass |
+| `src/pred_fab_nocodb/study_constants.py` | `StudyConstantsClient` |
+
+## Key points
+
+- All client methods raise from `errors.py` on failure; no silent fallbacks.
+- `dim_positions` codes generated as `'{domain}.d{depth}.{count}'`; counter is per-`(domain, depth)`.
+- `axes` JSON stored canonically (sorted keys, no whitespace) to enable `UNIQUE(domain, axes)`.
+- `ValueClient` is one parameterised class used by `params`, `features`, `attributes` (identical table shape).
+- `_HttpClient` is the only direct REST surface; tests substitute a fake.
+
+## Open risks
+
+- Counter generation under concurrent writes — currently relies on sequential pipelines. Add retry-on-conflict if multi-writer becomes real.
+- NocoDB JSONB column type may differ across versions; canonicalisation in `_axes.py` is the contract for `UNIQUE(domain, axes)`.
