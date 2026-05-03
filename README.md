@@ -93,7 +93,7 @@ Same shape — `ValueClient` parameterised per table.
 | Method | Description |
 |---|---|
 | `plan_experiment(*, study_code, exp_code, plan, dataset_code=None, domain=None)` | Create draft experiment + write all params in one shot |
-| `load_for_fabrication(*, exp_code, mark_running=True, densify_dim=None, n_steps=None)` | Read everything a fab script needs; optionally transitions DRAFT → RUNNING. Pass `densify_dim` + `n_steps` together to populate `FabricationLoad.dense_trajectories` (sort-by-step + carry-forward last value, with backward fill from the first authored value). |
+| `load_for_fabrication(*, exp_code, mark_running=True, schedule_dim=None)` | Read everything a fab script needs; optionally transitions DRAFT → RUNNING. Pass `schedule_dim` (e.g. `"layer_idx"`) to populate `FabricationLoad.sparse_trajectories` — `{param_code: {step_index: value, …}}`. The consumer chooses how to interpret the sparse map (carry-forward, interpolate, …). |
 | `save_fabrication_result(*, exp_code, status=DONE, features=None, attributes=None, ended_at=None, notes=None)` | Bulk-write features + attributes, transition status |
 | `load_dataset(*, dataset_code, only_done=False)` | Bundle all experiments in a dataset for training |
 

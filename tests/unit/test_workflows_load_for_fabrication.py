@@ -1,9 +1,10 @@
-"""Tests for WorkflowsClient.load_for_fabrication, focused on densification."""
+"""Tests for WorkflowsClient.load_for_fabrication, focused on sparse projection."""
 from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 
+from pred_fab_nocodb.errors import ValidationError
 from pred_fab_nocodb.workflows import WorkflowsClient
 
 
@@ -70,16 +71,16 @@ def _seed_basic(client: _FakeClient) -> None:
     }
 
 
-# ─── No densify args → unchanged behaviour ──────────────────────────────
+# ─── No schedule_dim → unchanged behaviour ──────────────────────────────
 
 
-def test_load_for_fabrication_default_returns_empty_dense_trajectories():
+def test_load_for_fabrication_default_returns_empty_sparse_trajectories():
     client = _FakeClient()
     _seed_basic(client)
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
     load = workflows.load_for_fabrication(exp_code="exp1", mark_running=False)
-    assert load.dense_trajectories == {}
-    # Sparse form preserved
+    assert load.sparse_trajectories == {}
+    # Raw sparse form (with full axes dicts) preserved
     assert "print_speed" in load.trajectory_params
     assert len(load.trajectory_params["print_speed"]) == 3
 
@@ -96,42 +97,27 @@ def test_load_for_fabrication_default_preserves_other_payload():
     assert load.static_params == {"path_offset": 1.5, "layer_height": 3.0}
 
 
-# ─── With densify args → populated dense_trajectories ───────────────────
+# ─── With schedule_dim → populated sparse_trajectories ──────────────────
 
 
-def test_load_for_fabrication_with_densify_populates_dense_trajectories():
+def test_load_for_fabrication_with_schedule_dim_populates_sparse_trajectories():
     client = _FakeClient()
     _seed_basic(client)
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
     load = workflows.load_for_fabrication(
         exp_code="exp1",
         mark_running=False,
-        densify_dim="layer_idx",
-        n_steps=10,
+        schedule_dim="layer_idx",
     )
-    assert load.dense_trajectories == {
-        "print_speed": [0.005, 0.005, 0.005, 0.006, 0.006, 0.006, 0.006, 0.008, 0.008, 0.008],
+    assert load.sparse_trajectories == {
+        "print_speed": {0: 0.005, 3: 0.006, 7: 0.008},
     }
-    # Sparse form remains intact alongside the dense form
+    # Raw sparse form (with full axes dicts) remains intact alongside
     assert load.trajectory_params["print_speed"]
 
 
-def test_dense_trajectories_lengths_match_n_steps():
-    client = _FakeClient()
-    _seed_basic(client)
-    workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    load = workflows.load_for_fabrication(
-        exp_code="exp1",
-        mark_running=False,
-        densify_dim="layer_idx",
-        n_steps=15,
-    )
-    for code, values in load.dense_trajectories.items():
-        assert len(values) == 15, f"{code} length {len(values)} != 15"
-
-
-def test_dense_trajectories_empty_when_no_trajectory_params():
-    """A study with only static params should yield an empty dense dict, not error."""
+def test_sparse_trajectories_empty_when_no_trajectory_params():
+    """A study with only static params should yield an empty sparse dict, not error."""
     client = _FakeClient()
     client.experiments.by_code["exp1"] = _FakeExp(id=1, code="exp1", study_id=42)
     client.params.static[1] = {"path_offset": 1.5}
@@ -139,30 +125,18 @@ def test_dense_trajectories_empty_when_no_trajectory_params():
     load = workflows.load_for_fabrication(
         exp_code="exp1",
         mark_running=False,
-        densify_dim="layer_idx",
-        n_steps=5,
+        schedule_dim="layer_idx",
     )
-    assert load.dense_trajectories == {}
+    assert load.sparse_trajectories == {}
 
 
-# ─── Argument-pairing validation ────────────────────────────────────────
-
-
-def test_load_for_fabrication_rejects_densify_dim_without_n_steps():
+def test_load_for_fabrication_propagates_validation_errors():
+    """A trajectory entry missing the schedule dimension surfaces ValidationError."""
     client = _FakeClient()
-    _seed_basic(client)
+    client.experiments.by_code["exp1"] = _FakeExp(id=1, code="exp1", study_id=42)
+    client.params.trajectory[1] = {"speed": [({"node_idx": 0}, 0.005)]}
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="must be supplied together"):
+    with pytest.raises(ValidationError, match="missing dimension"):
         workflows.load_for_fabrication(
-            exp_code="exp1", mark_running=False, densify_dim="layer_idx",
-        )
-
-
-def test_load_for_fabrication_rejects_n_steps_without_densify_dim():
-    client = _FakeClient()
-    _seed_basic(client)
-    workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="must be supplied together"):
-        workflows.load_for_fabrication(
-            exp_code="exp1", mark_running=False, n_steps=5,
+            exp_code="exp1", mark_running=False, schedule_dim="layer_idx",
         )

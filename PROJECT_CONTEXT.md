@@ -25,7 +25,7 @@ Typed read/write access to a NocoDB workspace structured per the pred-fab schema
 | `src/pred_fab_nocodb/dim_positions.py` | `DimPositionsClient` + `DimPosition` dataclass |
 | `src/pred_fab_nocodb/study_constants.py` | `StudyConstantsClient` |
 | `src/pred_fab_nocodb/workflows.py` | `WorkflowsClient` + payload dataclasses (`FabricationLoad`, `ExperimentBundle`, `ExperimentPlan`) |
-| `src/pred_fab_nocodb/_densifier.py` | Sparse → dense per-step expansion for trajectory params — internal, used by `WorkflowsClient.load_for_fabrication(densify_dim=…, n_steps=…)` |
+| `src/pred_fab_nocodb/_projector.py` | Per-dimension projection of sparse trajectory entries (`{(axes_dict, value), …}` → `{step_index: value, …}`) — internal, used by `WorkflowsClient.load_for_fabrication(schedule_dim=…)` |
 | `src/pred_fab_nocodb/schema_validator.py` | `SchemaValidator` — recursive diff + `assert_compatible` for study schema dicts |
 
 ## Key points
