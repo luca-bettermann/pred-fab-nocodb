@@ -15,7 +15,15 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from ._projector import project_to_dimension
 from ._values import ValueWriteItem
-from .schema import Status
+from .errors import NotFoundError
+from .schema import (
+    AttributeColumns,
+    DatasetColumns,
+    ExperimentColumns,
+    FeatureColumns,
+    ParamColumns,
+    Status,
+)
 
 if TYPE_CHECKING:
     from .client import NocoDBClient
@@ -223,3 +231,76 @@ class WorkflowsClient:
                 )
             )
         return bundles
+
+    # ─── Purge ────────────────────────────────────────────────────────
+
+    def purge_dataset(self, dataset_code: str) -> dict[str, int]:
+        """Delete a dataset, its experiments, and every per-experiment value row.
+
+        Useful as the cleanup step before a re-plan run with `--overwrite`.
+        Idempotent: returns zero-counts and skips if the dataset is absent.
+        ``dim_positions`` and ``set_study_constants`` are intentionally
+        untouched — they may be referenced by other datasets in the same
+        study, and re-creating them on the next plan is wasteful.
+
+        Returns the number of rows removed per table — useful for logging.
+        """
+        counts = {
+            "datasets": 0,
+            "experiments": 0,
+            "params": 0,
+            "features": 0,
+            "attributes": 0,
+        }
+        try:
+            dataset = self._c.datasets.get_by_code(dataset_code)
+        except NotFoundError:
+            return counts
+
+        experiments = self._c.experiments.list_by_dataset(dataset.id)
+
+        # Cascade: per-experiment value rows first, then the experiments,
+        # then the dataset row itself.
+        for exp in experiments:
+            counts["params"] += self._delete_values_for_exp(
+                self._c.params._table_id, exp.id, ParamColumns.EXPERIMENT,
+            )
+            counts["features"] += self._delete_values_for_exp(
+                self._c.features._table_id, exp.id, FeatureColumns.EXPERIMENT,
+            )
+            counts["attributes"] += self._delete_values_for_exp(
+                self._c.attributes._table_id, exp.id, AttributeColumns.EXPERIMENT,
+            )
+
+        if experiments:
+            self._c._http.records_delete(
+                self._c.experiments._table_id,
+                [{ExperimentColumns.ID: e.id} for e in experiments],
+            )
+            counts["experiments"] = len(experiments)
+
+        self._c._http.records_delete(
+            self._c.datasets._table_id,
+            {DatasetColumns.ID: dataset.id},
+        )
+        counts["datasets"] = 1
+        return counts
+
+    def _delete_values_for_exp(
+        self,
+        table_id: str,
+        exp_id: int,
+        experiment_column: str,
+    ) -> int:
+        """Bulk-delete every set_exp_* row whose experiment FK == exp_id."""
+        rows = self._c._http.records_list(
+            table_id,
+            where=f"({experiment_column},eq,{exp_id})",
+        )
+        if not rows:
+            return 0
+        self._c._http.records_delete(
+            table_id,
+            [{"Id": int(r["Id"])} for r in rows],
+        )
+        return len(rows)
