@@ -124,19 +124,7 @@ class WorkflowsClient:
         mark_running: bool = True,
         schedule_dim: Optional[str] = None,
     ) -> FabricationLoad:
-        """Read everything a fab script needs.
-
-        Optionally transitions the experiment from DRAFT to RUNNING with a
-        timestamp (default: yes).
-
-        ``schedule_dim`` selects one axis to project the trajectory entries
-        onto (e.g. ``"layer_idx"``); the result is a per-step sparse dict
-        per param code in ``FabricationLoad.sparse_trajectories``.
-        Consumers choose how to interpret the sparse map (carry-forward,
-        interpolate, ...). When ``schedule_dim`` is None,
-        ``sparse_trajectories`` is empty and only the raw
-        ``trajectory_params`` is populated.
-        """
+        """Read everything a fab script needs; pass ``schedule_dim`` to also project trajectories."""
         exp = self._c.experiments.get_by_code(exp_code)
         constants = self._c.study_constants.read(exp.study_id)
         static = self._c.params.read_static(exp.id)

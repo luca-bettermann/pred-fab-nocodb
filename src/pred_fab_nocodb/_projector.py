@@ -1,13 +1,4 @@
-"""Project per-dimension trajectory entries into a per-step sparse dict.
-
-NocoDB stores trajectory params with a generic ``axes`` dict (e.g. for
-multi-axis schedules). Fab scripts typically index by a single dimension
-(``layer_idx``). This module owns the projection: drop down to one
-dimension and key by step index, preserving the sparse shape so consumers
-(fimocc et al.) can do their own carry-forward lookup.
-
-Pure stdlib — no pred-fab, no torch.
-"""
+"""Project per-dimension trajectory entries into a per-step sparse dict."""
 from __future__ import annotations
 
 from typing import Any
@@ -20,22 +11,7 @@ def project_to_dimension(
     *,
     dimension: str,
 ) -> dict[str, dict[int, Any]]:
-    """Project a generic sparse trajectory dict to a single dimension.
-
-    Args:
-        sparse: ``{param_code: [(axes_dict, value), ...]}``. Each entry's
-            ``axes_dict`` must contain ``dimension`` as a key.
-        dimension: The axis to project onto (e.g. ``"layer_idx"``).
-
-    Returns:
-        ``{param_code: {step_index: value, ...}}``. Codes whose entry list
-        is empty are omitted. The consumer chooses how to interpret the
-        sparse map (carry-forward, interpolate, etc.).
-
-    Raises:
-        ValidationError: An entry's axes dict is missing ``dimension``,
-            or an entry's step index is negative.
-    """
+    """``{code: [(axes, value), ...]}`` → ``{code: {step: value, ...}}``."""
     out: dict[str, dict[int, Any]] = {}
     for code, entries in sparse.items():
         if not entries:
