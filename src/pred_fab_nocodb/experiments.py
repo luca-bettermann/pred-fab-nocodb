@@ -78,8 +78,11 @@ class ExperimentsClient(_BaseTableClient):
             body[ExperimentColumns.DATASET] = dataset_id
         if notes is not None:
             body[ExperimentColumns.NOTES] = notes
-        result = self._http.records_create(self._table_id, body)
-        return self.get_by_code(code) if not isinstance(result, dict) else _row_to_experiment(result)
+        self._http.records_create(self._table_id, body)
+        # NocoDB v2's POST response sometimes contains only {"Id": N} rather
+        # than the full row — re-fetch by the just-written code to get a
+        # complete Experiment reliably.
+        return self.get_by_code(code)
 
     def update_status(self, experiment_id: int, status: Status) -> None:
         """Change an experiment's status."""

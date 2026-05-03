@@ -51,9 +51,11 @@ class StudiesClient(_BaseTableClient):
         body: dict[str, Any] = {StudyColumns.CODE: code}
         if description is not None:
             body[StudyColumns.DESCRIPTION] = description
-        result = self._http.records_create(self._table_id, body)
-        # NocoDB's POST returns the created row including its assigned Id
-        return self.get_by_code(code) if not isinstance(result, dict) else _row_to_study(result)
+        self._http.records_create(self._table_id, body)
+        # NocoDB v2's POST response sometimes contains only {"Id": N} rather
+        # than the full row — re-fetch by the just-written code to get a
+        # complete Study reliably.
+        return self.get_by_code(code)
 
     def push_schema(self, study_id: int, schema: dict[str, Any]) -> None:
         """Write `schema` (serialised to JSON) into `studies.schema_json` for this study."""

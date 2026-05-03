@@ -79,8 +79,11 @@ class DatasetsClient(_BaseTableClient):
         }
         if description is not None:
             body[DatasetColumns.DESCRIPTION] = description
-        result = self._http.records_create(self._table_id, body)
-        return self.get_by_code(code) if not isinstance(result, dict) else _row_to_dataset(result)
+        self._http.records_create(self._table_id, body)
+        # NocoDB v2's POST response sometimes contains only {"Id": N} rather
+        # than the full row — re-fetch by the just-written code to get a
+        # complete Dataset reliably.
+        return self.get_by_code(code)
 
 
 def _row_to_dataset(row: dict[str, Any]) -> Dataset:
