@@ -93,11 +93,11 @@ class ValueClient(_BaseTableClient):
             value=value,
             dim_id=dim_id,
         )
-        result = self._http.records_create(self._table_id, body)
-        return self._row_to_value(
-            result if isinstance(result, dict) and ParamColumns.ID in result
-            else self._lookup_by_code(row_code)
-        )
+        self._http.records_create(self._table_id, body)
+        # NocoDB v2's POST response sometimes contains only {"Id": N} rather
+        # than the full row — re-fetch by the just-written code to get a
+        # complete ValueRow reliably.
+        return self._row_to_value(self._lookup_by_code(row_code))
 
     def write_batch(
         self,

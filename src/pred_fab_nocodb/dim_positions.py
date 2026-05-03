@@ -121,12 +121,11 @@ class DimPositionsClient(_BaseTableClient):
             DimPositionColumns.DEPTH: depth,
             DimPositionColumns.AXES: canonical,
         }
-        result = self._http.records_create(self._table_id, body)
-        position = (
-            _row_to_position(result)
-            if isinstance(result, dict) and DimPositionColumns.ID in result
-            else self.get_by_code(code)
-        )
+        self._http.records_create(self._table_id, body)
+        # NocoDB v2's POST response sometimes contains only {"Id": N} rather
+        # than the full row — re-fetch by the just-written code to get a
+        # complete DimPosition reliably.
+        position = self.get_by_code(code)
         self._cache[(domain, canonical)] = position
         return position
 
