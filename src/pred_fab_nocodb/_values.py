@@ -106,27 +106,27 @@ class ValueClient(_BaseTableClient):
         exp_code: str,
         items: list[ValueWriteItem],
     ) -> list[ValueRow]:
-        """Bulk write. Reuses the shared dim-position cache."""
-        bodies: list[dict[str, Any]] = []
-        for item in items:
-            dim_id, dim_code = self._resolve_dim(domain=item.domain, axes=item.axes)
-            row_code = make_value_code(
-                exp_code=exp_code, value_code=item.value_code, dim_code=dim_code
+        """Per-row write loop. Reuses the shared dim-position cache.
+
+        Originally a single bulk POST, but NocoDB v2's bulk-records endpoint
+        silently drops link-field values from the body — `experiment` and
+        `dim` FKs ended up null on every inserted row, leaving set_exp_params
+        orphaned from the experiments and dim_positions tables. Single-row
+        POST does honour inline links (the path `experiments.create` already
+        relies on), so we loop. O(N) HTTP calls instead of 1, but the link
+        columns now populate correctly.
+        """
+        return [
+            self.write(
+                exp_id=exp_id,
+                exp_code=exp_code,
+                value_code=item.value_code,
+                value=item.value,
+                domain=item.domain,
+                axes=item.axes,
             )
-            bodies.append(
-                self._build_body(
-                    row_code=row_code,
-                    exp_id=exp_id,
-                    value_code=item.value_code,
-                    value=item.value,
-                    dim_id=dim_id,
-                )
-            )
-        if not bodies:
-            return []
-        self._http.records_create(self._table_id, bodies)
-        # Re-fetch by code to materialise the typed dataclasses
-        return [self._row_to_value(self._lookup_by_code(b[ParamColumns.CODE])) for b in bodies]
+            for item in items
+        ]
 
     # ─── Read ─────────────────────────────────────────────────────────
 
