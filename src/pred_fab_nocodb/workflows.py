@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
+from ._densifier import densify
 from ._values import ValueWriteItem
 from .schema import Status
 
@@ -31,6 +32,7 @@ class FabricationLoad:
     study_constants: dict[str, float]
     static_params: dict[str, Any]
     trajectory_params: dict[str, list[tuple[dict[str, int], Any]]]
+    dense_trajectories: dict[str, list[Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -120,12 +122,27 @@ class WorkflowsClient:
         *,
         exp_code: str,
         mark_running: bool = True,
+        densify_dim: Optional[str] = None,
+        n_steps: Optional[int] = None,
     ) -> FabricationLoad:
         """Read everything a fab script needs.
 
         Optionally transitions the experiment from DRAFT to RUNNING with a
         timestamp (default: yes).
+
+        ``densify_dim`` + ``n_steps`` together populate
+        ``FabricationLoad.dense_trajectories``: a per-step list per param
+        code, sort-by-step + carry-forward last-value (with backward-fill
+        from the first authored value). Both must be supplied together;
+        otherwise raises ``ValueError``. When neither is supplied,
+        ``dense_trajectories`` is empty and behaviour is unchanged.
         """
+        if (densify_dim is None) != (n_steps is None):
+            raise ValueError(
+                "densify_dim and n_steps must be supplied together "
+                f"(got densify_dim={densify_dim!r}, n_steps={n_steps!r})"
+            )
+
         exp = self._c.experiments.get_by_code(exp_code)
         constants = self._c.study_constants.read(exp.study_id)
         static = self._c.params.read_static(exp.id)
@@ -133,6 +150,11 @@ class WorkflowsClient:
         if mark_running:
             self._c.experiments.update_status(exp.id, Status.RUNNING)
             self._c.experiments.update_timestamps(exp.id, started_at=datetime.utcnow())
+
+        dense: dict[str, list[Any]] = {}
+        if densify_dim is not None and n_steps is not None:
+            dense = densify(trajectory, dimension=densify_dim, n_steps=n_steps)
+
         return FabricationLoad(
             experiment_id=exp.id,
             experiment_code=exp.code,
@@ -140,6 +162,7 @@ class WorkflowsClient:
             study_constants=constants,
             static_params=static,
             trajectory_params=trajectory,
+            dense_trajectories=dense,
         )
 
     # ─── Save fabrication result ──────────────────────────────────────
