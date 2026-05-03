@@ -60,8 +60,9 @@ class ValueClient(_BaseTableClient):
         *,
         fk_code_column: str,
         dim_client: "DimPositionsClient",
+        link_field_ids: dict[str, str] | None = None,
     ):
-        super().__init__(http, base_id, table_id)
+        super().__init__(http, base_id, table_id, link_field_ids=link_field_ids)
         self._fk_col = fk_code_column
         self._dim_client = dim_client
 
@@ -88,15 +89,19 @@ class ValueClient(_BaseTableClient):
         row_code = make_value_code(exp_code=exp_code, value_code=value_code, dim_code=dim_code)
         body = self._build_body(
             row_code=row_code,
-            exp_id=exp_id,
             value_code=value_code,
             value=value,
-            dim_id=dim_id,
         )
+        # 1. Create the row without LTAR fields (NocoDB v2 silently drops
+        #    inline link values, especially in bulk POSTs).
         self._http.records_create(self._table_id, body)
-        # NocoDB v2's POST response sometimes contains only {"Id": N} rather
-        # than the full row — re-fetch by the just-written code to get a
-        # complete ValueRow reliably.
+        # 2. Re-fetch by code to get the new row's id (POST response may be partial).
+        row = self._lookup_by_code(row_code)
+        record_id = int(row[ParamColumns.ID])
+        # 3. Wire links via the dedicated /links/ endpoint.
+        self._link(ParamColumns.EXPERIMENT, record_id, exp_id)
+        if dim_id is not None:
+            self._link(ParamColumns.DIM, record_id, dim_id)
         return self._row_to_value(self._lookup_by_code(row_code))
 
     def write_batch(
@@ -106,27 +111,48 @@ class ValueClient(_BaseTableClient):
         exp_code: str,
         items: list[ValueWriteItem],
     ) -> list[ValueRow]:
-        """Per-row write loop. Reuses the shared dim-position cache.
+        """Bulk-create rows, then wire LTAR links via the /links/ endpoint.
 
-        Originally a single bulk POST, but NocoDB v2's bulk-records endpoint
-        silently drops link-field values from the body — `experiment` and
-        `dim` FKs ended up null on every inserted row, leaving set_exp_params
-        orphaned from the experiments and dim_positions tables. Single-row
-        POST does honour inline links (the path `experiments.create` already
-        relies on), so we loop. O(N) HTTP calls instead of 1, but the link
-        columns now populate correctly.
+        NocoDB v2's bulk records-create silently drops link-field values
+        from the body, so we keep `experiment` and `dim` out of the bulk
+        POST and wire them afterwards via the dedicated /links/ endpoint.
+        Cost: 1 bulk records-create + 2N link calls per batch — but the
+        link columns reliably populate, regardless of single vs bulk.
         """
-        return [
-            self.write(
-                exp_id=exp_id,
-                exp_code=exp_code,
-                value_code=item.value_code,
-                value=item.value,
-                domain=item.domain,
-                axes=item.axes,
+        if not items:
+            return []
+        # Resolve dims (cached) and build value-only bodies for the bulk POST.
+        bodies: list[dict[str, Any]] = []
+        per_row_dim_ids: list[Optional[int]] = []
+        row_codes: list[str] = []
+        for item in items:
+            dim_id, dim_code = self._resolve_dim(domain=item.domain, axes=item.axes)
+            row_code = make_value_code(
+                exp_code=exp_code, value_code=item.value_code, dim_code=dim_code,
             )
-            for item in items
-        ]
+            bodies.append(
+                self._build_body(
+                    row_code=row_code,
+                    value_code=item.value_code,
+                    value=item.value,
+                )
+            )
+            per_row_dim_ids.append(dim_id)
+            row_codes.append(row_code)
+
+        # 1. Bulk-create. Response shape varies; we re-fetch by code below.
+        self._http.records_create(self._table_id, bodies)
+
+        # 2. Re-fetch each row to get its assigned id, then set the LTAR links.
+        results: list[ValueRow] = []
+        for row_code, dim_id in zip(row_codes, per_row_dim_ids):
+            row = self._lookup_by_code(row_code)
+            record_id = int(row[ParamColumns.ID])
+            self._link(ParamColumns.EXPERIMENT, record_id, exp_id)
+            if dim_id is not None:
+                self._link(ParamColumns.DIM, record_id, dim_id)
+            results.append(self._row_to_value(self._lookup_by_code(row_code)))
+        return results
 
     # ─── Read ─────────────────────────────────────────────────────────
 
@@ -206,20 +232,19 @@ class ValueClient(_BaseTableClient):
         self,
         *,
         row_code: str,
-        exp_id: int,
         value_code: str,
         value: Any,
-        dim_id: Optional[int],
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {
+        """Build a records-create body with non-LTAR columns only.
+
+        ``experiment`` and ``dim`` are LTAR fields and are wired post-create
+        via the /links/ endpoint, not via inline POST values.
+        """
+        return {
             ParamColumns.CODE: row_code,
-            ParamColumns.EXPERIMENT: exp_id,
             self._fk_col: value_code,
             ParamColumns.VALUE: value,
         }
-        if dim_id is not None:
-            body[ParamColumns.DIM] = dim_id
-        return body
 
     def _lookup_by_code(self, row_code: str) -> dict[str, Any]:
         rows = self._http.records_list(

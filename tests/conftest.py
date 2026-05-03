@@ -22,6 +22,12 @@ class FakeNocoDBHttp:
         # Override responses keyed by (method, path)
         self._overrides: dict[tuple[str, str], Any] = {}
         self._next_id_per_table: dict[str, int] = {}
+        # Per-table column metadata returned by meta_get_table
+        self._columns: dict[str, list[dict[str, Any]]] = {}
+        # Links recorded via link_records: (table_id, field_id, record_id) -> [linked_ids]
+        self._links: dict[tuple[str, str, int], list[int]] = {}
+        # Map (table_id, link_field_id) -> column name to mirror onto the row
+        self._link_field_to_column: dict[tuple[str, str], str] = {}
 
     # ─── Test setup helpers ───────────────────────────────────────────
 
@@ -135,6 +141,65 @@ class FakeNocoDBHttp:
         self.calls.append(("meta_list_tables", base_id, None, None))
         # Every table_id we've seen so far is exposed with its name == id (test convention)
         return [{"id": tid, "title": tid} for tid in self._tables.keys()]
+
+    def meta_get_table(self, table_id: str) -> dict[str, Any]:
+        """Return seeded column metadata for a table (set via `set_columns`)."""
+        self.calls.append(("meta_get_table", table_id, None, None))
+        return {
+            "id": table_id,
+            "title": table_id,
+            "columns": list(self._columns.get(table_id, [])),
+        }
+
+    def set_columns(self, table_id: str, columns: list[dict[str, Any]]) -> None:
+        """Test helper: register column metadata returned by `meta_get_table`."""
+        self._columns[table_id] = list(columns)
+
+    # ─── Links API ────────────────────────────────────────────────────
+
+    def link_records(
+        self,
+        *,
+        table_id: str,
+        link_field_id: str,
+        record_id: int,
+        linked_record_ids: int | list[int],
+    ) -> None:
+        """Record link calls; expose them via `.link_calls` for assertions.
+
+        Also mirror NocoDB's effect: after a link write, subsequent reads of
+        the row see the linked id in the corresponding column. Tests can
+        register the column-name mapping for a link field via `set_link_field`.
+        """
+        self.calls.append(("link_records", table_id, {"field": link_field_id, "record": record_id}, linked_record_ids))
+        ids = [linked_record_ids] if isinstance(linked_record_ids, int) else list(linked_record_ids)
+        self._links.setdefault((table_id, link_field_id, record_id), []).extend(ids)
+        # Reflect the link onto the row itself: write linked_record_ids into the
+        # column whose name was registered for this link field id (if any).
+        column_name = self._link_field_to_column.get((table_id, link_field_id))
+        if column_name is not None:
+            for row in self._tables.get(table_id, []):
+                if int(row.get("Id", -1)) == record_id:
+                    row[column_name] = (
+                        ids[0] if isinstance(linked_record_ids, int) else list(ids)
+                    )
+                    break
+
+    def set_link_field(self, table_id: str, link_field_id: str, column_name: str) -> None:
+        """Register the column name a given link field updates on its row.
+
+        Used by tests so that `link_records` mirrors the real NocoDB effect
+        of populating the FK column after a link write.
+        """
+        self._link_field_to_column[(table_id, link_field_id)] = column_name
+
+    @property
+    def link_calls(self) -> list[tuple[str, str, int, list[int]]]:
+        """Materialised view: list of (table_id, link_field_id, record_id, [linked_ids])."""
+        return [
+            (tid, fid, rid, list(linked))
+            for (tid, fid, rid), linked in self._links.items()
+        ]
 
     def close(self) -> None:
         pass

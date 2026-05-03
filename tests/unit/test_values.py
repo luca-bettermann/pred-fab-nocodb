@@ -14,7 +14,13 @@ def _make_clients(fake_http):
         table_id="set_exp_params",
         fk_code_column="param",
         dim_client=dim,
+        # LTAR fields on set_exp_params — wired via /links/ endpoint.
+        link_field_ids={"experiment": "fld_exp_link", "dim": "fld_dim_link"},
     )
+    # Mirror NocoDB's behaviour: after link_records, the FK column on the row
+    # gets populated with the linked id.
+    fake_http.set_link_field("set_exp_params", "fld_exp_link", "experiment")
+    fake_http.set_link_field("set_exp_params", "fld_dim_link", "dim")
     return dim, params
 
 
@@ -58,6 +64,66 @@ def test_write_batch_reuses_dim(fake_http):
     # Same dim_position used for both
     assert len(fake_http.get_records("dim_positions")) == 1
     assert len(fake_http.get_records("set_exp_params")) == 2
+
+
+def test_write_links_experiment_via_links_endpoint(fake_http):
+    """Verify ValueClient.write hits NocoDB's /links/ endpoint for the experiment FK."""
+    _dim, params = _make_clients(fake_http)
+    params.write(
+        exp_id=42, exp_code="ADVEI/exp_001",
+        value_code="path_offset", value="2.5",
+    )
+    # Look for the link call on the experiment field
+    links = [c for c in fake_http.calls if c[0] == "link_records"]
+    exp_links = [c for c in links if c[2]["field"] == "fld_exp_link"]
+    assert exp_links, "no link call to set the experiment FK"
+    # Linked record id matches what we passed
+    assert exp_links[0][3] == 42
+
+
+def test_write_batch_links_experiment_and_dim(fake_http):
+    """Each batched row gets its experiment link + dim link (when applicable)."""
+    _dim, params = _make_clients(fake_http)
+    items = [
+        ValueWriteItem(
+            value_code="V_fab", value="0.005",
+            domain="structural", axes={"layer_idx": 0},
+        ),
+        ValueWriteItem(
+            value_code="V_fab", value="0.006",
+            domain="structural", axes={"layer_idx": 1},
+        ),
+    ]
+    params.write_batch(exp_id=42, exp_code="ADVEI/exp_001", items=items)
+    links = [c for c in fake_http.calls if c[0] == "link_records"]
+    exp_links = [c for c in links if c[2]["field"] == "fld_exp_link"]
+    dim_links = [c for c in links if c[2]["field"] == "fld_dim_link"]
+    # 2 experiment links (one per row), 2 dim links (one per row)
+    assert len(exp_links) == 2
+    assert len(dim_links) == 2
+    # Both rows linked to the same experiment id
+    assert all(c[3] == 42 for c in exp_links)
+    # Dim ids are distinct (different layer_idx values)
+    dim_target_ids = {c[3] for c in dim_links}
+    assert len(dim_target_ids) == 2
+
+
+def test_write_does_not_send_link_fields_in_records_create(fake_http):
+    """LTAR fields must not appear in the records-create POST body."""
+    _dim, params = _make_clients(fake_http)
+    params.write(
+        exp_id=42, exp_code="ADVEI/exp_001",
+        value_code="V_fab", value="0.005",
+        domain="structural", axes={"layer_idx": 0},
+    )
+    create_calls = [c for c in fake_http.calls if c[0] == "records_create"]
+    assert create_calls, "expected at least one records_create"
+    # The set_exp_params create body must not carry experiment / dim
+    set_exp_params_creates = [c for c in create_calls if c[1] == "set_exp_params"]
+    assert set_exp_params_creates
+    body = set_exp_params_creates[0][3]
+    assert ParamColumns.EXPERIMENT not in body
+    assert ParamColumns.DIM not in body
 
 
 def test_read_static_filters_to_null_dim(fake_http):

@@ -59,15 +59,20 @@ class StudyConstantsClient(_BaseTableClient):
         existing = self._find_id(study_id=study_id, param_code=param_code)
         body: dict[str, Any] = {
             StudyConstantColumns.CODE: code,
-            StudyConstantColumns.STUDY: study_id,
             StudyConstantColumns.PARAM: param_code,
             StudyConstantColumns.VALUE: value,
         }
         if existing is None:
             self._http.records_create(self._table_id, body)
+            # Look up the new row by its just-written `code` (the study link
+            # isn't set yet, so we can't filter by study_id).
+            constant_id = self._find_id_by_code(code)
+            if constant_id is not None:
+                self._link(StudyConstantColumns.STUDY, constant_id, study_id)
         else:
             body[StudyConstantColumns.ID] = existing
             self._http.records_update(self._table_id, body)
+            # Existing row already has its study link set; nothing to do.
 
     def delete(self, *, study_id: int, param_code: str) -> None:
         """Remove a constant. Raises `NotFoundError` if it doesn't exist."""
@@ -85,6 +90,18 @@ class StudyConstantsClient(_BaseTableClient):
                 f"({StudyConstantColumns.STUDY},eq,{study_id})"
                 f"~and({StudyConstantColumns.PARAM},eq,{param_code})"
             ),
+            limit=1,
+        )
+        if not rows:
+            return None
+        return int(rows[0][StudyConstantColumns.ID])
+
+    def _find_id_by_code(self, code: str) -> Optional[int]:
+        """Lookup by `code` only — used right after create() before the study
+        link is set, when filter-by-study_id wouldn't match yet."""
+        rows = self._http.records_list(
+            self._table_id,
+            where=f"({StudyConstantColumns.CODE},eq,{code})",
             limit=1,
         )
         if not rows:

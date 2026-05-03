@@ -37,8 +37,15 @@ class DimPositionsClient(_BaseTableClient):
     incur additional round-trips.
     """
 
-    def __init__(self, http, base_id: str, table_id: str):
-        super().__init__(http, base_id, table_id)
+    def __init__(
+        self,
+        http,
+        base_id: str,
+        table_id: str,
+        *,
+        link_field_ids: dict[str, str] | None = None,
+    ):
+        super().__init__(http, base_id, table_id, link_field_ids=link_field_ids)
         self._cache: dict[tuple[str, str], DimPosition] = {}
 
     # ─── Read ─────────────────────────────────────────────────────────

@@ -72,18 +72,21 @@ class DatasetsClient(_BaseTableClient):
         code = make_dataset_code(study_code, name)
         body: dict[str, Any] = {
             DatasetColumns.CODE: code,
-            DatasetColumns.STUDY: study_id,
             DatasetColumns.NAME: name,
             DatasetColumns.STRATEGY: strategy.value,
             DatasetColumns.PURPOSE: purpose.value,
         }
         if description is not None:
             body[DatasetColumns.DESCRIPTION] = description
+        # 1. Create the row without LTAR fields. NocoDB v2 silently drops
+        #    inline link values from records-create bodies (esp. on bulk),
+        #    so links go through the dedicated /links/ endpoint below.
         self._http.records_create(self._table_id, body)
-        # NocoDB v2's POST response sometimes contains only {"Id": N} rather
-        # than the full row — re-fetch by the just-written code to get a
-        # complete Dataset reliably.
-        return self.get_by_code(code)
+        # 2. Re-fetch by code: NocoDB's POST response can be partial.
+        dataset = self.get_by_code(code)
+        # 3. Set the study link via NocoDB's /links/ endpoint.
+        self._link(DatasetColumns.STUDY, dataset.id, study_id)
+        return dataset
 
 
 def _row_to_dataset(row: dict[str, Any]) -> Dataset:

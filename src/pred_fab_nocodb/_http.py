@@ -91,6 +91,38 @@ class _NocoDBHttp:
         tables = body.get("list", [])
         return tables if isinstance(tables, list) else []
 
+    def meta_get_table(self, table_id: str) -> dict[str, Any]:
+        """`GET /api/v2/meta/tables/{tableId}` — full table metadata incl. columns."""
+        return self._request("GET", f"/api/v2/meta/tables/{table_id}")
+
+    def link_records(
+        self,
+        *,
+        table_id: str,
+        link_field_id: str,
+        record_id: int,
+        linked_record_ids: int | list[int],
+    ) -> None:
+        """`POST /api/v2/tables/{tableId}/links/{linkFieldId}/records/{recordId}`.
+
+        Sets a LinkToAnotherRecord (LTAR) field. NocoDB v2's records-create
+        endpoint silently drops link-field values from a bulk POST body, so
+        link writes must go through this dedicated endpoint to be honoured.
+
+        Body shape: a single int → ``{"Id": <id>}`` (single-record link);
+        a list of ints → ``[{"Id": <id1>}, ...]`` (has-many / many-to-many).
+        """
+        body: dict[str, Any] | list[dict[str, Any]]
+        if isinstance(linked_record_ids, int):
+            body = {"Id": int(linked_record_ids)}
+        else:
+            body = [{"Id": int(rid)} for rid in linked_record_ids]
+        self._request(
+            "POST",
+            f"/api/v2/tables/{table_id}/links/{link_field_id}/records/{record_id}",
+            json=body,
+        )
+
     # ─── Internal ──────────────────────────────────────────────────────
 
     def _request(

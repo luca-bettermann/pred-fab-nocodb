@@ -66,22 +66,33 @@ class NocoDBClient:
         )
         self._base_id = base_id
         self._table_ids = _resolve_table_ids(self._http, base_id)
+        # Per-table LTAR field-id lookup, used by every client to set links
+        # via NocoDB's dedicated `/links/` endpoint.
+        self._link_field_ids = _resolve_link_field_ids(self._http, self._table_ids)
+
+        def _links(table_name: str) -> dict[str, str]:
+            return self._link_field_ids.get(table_name, {})
 
         # Independent table clients
         self.studies = StudiesClient(
-            self._http, base_id, self._table_ids[Tables.STUDIES]
+            self._http, base_id, self._table_ids[Tables.STUDIES],
+            link_field_ids=_links(Tables.STUDIES),
         )
         self.experiments = ExperimentsClient(
-            self._http, base_id, self._table_ids[Tables.EXPERIMENTS]
+            self._http, base_id, self._table_ids[Tables.EXPERIMENTS],
+            link_field_ids=_links(Tables.EXPERIMENTS),
         )
         self.datasets = DatasetsClient(
-            self._http, base_id, self._table_ids[Tables.DATASETS]
+            self._http, base_id, self._table_ids[Tables.DATASETS],
+            link_field_ids=_links(Tables.DATASETS),
         )
         self.dim_positions = DimPositionsClient(
-            self._http, base_id, self._table_ids[Tables.DIM_POSITIONS]
+            self._http, base_id, self._table_ids[Tables.DIM_POSITIONS],
+            link_field_ids=_links(Tables.DIM_POSITIONS),
         )
         self.study_constants = StudyConstantsClient(
-            self._http, base_id, self._table_ids[Tables.SET_STUDY_CONSTANTS]
+            self._http, base_id, self._table_ids[Tables.SET_STUDY_CONSTANTS],
+            link_field_ids=_links(Tables.SET_STUDY_CONSTANTS),
         )
 
         # Value clients — share `dim_positions` so the cache benefits all writes
@@ -91,6 +102,7 @@ class NocoDBClient:
             self._table_ids[Tables.SET_EXP_PARAMS],
             fk_code_column=ParamColumns.PARAM,
             dim_client=self.dim_positions,
+            link_field_ids=_links(Tables.SET_EXP_PARAMS),
         )
         self.features = ValueClient(
             self._http,
@@ -98,6 +110,7 @@ class NocoDBClient:
             self._table_ids[Tables.SET_EXP_FEATURES],
             fk_code_column=FeatureColumns.FEATURE,
             dim_client=self.dim_positions,
+            link_field_ids=_links(Tables.SET_EXP_FEATURES),
         )
         self.attributes = ValueClient(
             self._http,
@@ -105,6 +118,7 @@ class NocoDBClient:
             self._table_ids[Tables.SET_EXP_ATTRIBUTES],
             fk_code_column=AttributeColumns.ATTRIBUTE,
             dim_client=self.dim_positions,
+            link_field_ids=_links(Tables.SET_EXP_ATTRIBUTES),
         )
 
         # Workflow helpers — composed from the above
@@ -138,3 +152,30 @@ def _resolve_table_ids(http: _NocoDBHttp, base_id: str) -> dict[str, str]:
             f"NocoDB base {base_id!r} is missing required tables: {missing}"
         )
     return {name: by_name[name] for name in _REQUIRED_TABLES}
+
+
+def _resolve_link_field_ids(
+    http: _NocoDBHttp,
+    table_ids: dict[str, str],
+) -> dict[str, dict[str, str]]:
+    """For every required table, resolve {field_name → link_field_id} for its
+    LinkToAnotherRecord (LTAR) columns.
+
+    Used by sub-clients to call ``http.link_records(...)`` against NocoDB's
+    dedicated `/api/v2/tables/{tid}/links/{linkFieldId}/records/{rid}`
+    endpoint — the only place NocoDB v2 reliably honours link-field writes
+    (the records-create endpoint silently drops them in bulk POSTs).
+    """
+    out: dict[str, dict[str, str]] = {}
+    for table_name, table_id in table_ids.items():
+        meta = http.meta_get_table(table_id)
+        ltar_fields: dict[str, str] = {}
+        for col in meta.get("columns", []):
+            if col.get("uidt") != "LinkToAnotherRecord":
+                continue
+            title = col.get("title", "")
+            field_id = col.get("id", "")
+            if title and field_id:
+                ltar_fields[title] = field_id
+        out[table_name] = ltar_fields
+    return out

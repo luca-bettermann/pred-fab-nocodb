@@ -71,18 +71,19 @@ class ExperimentsClient(_BaseTableClient):
         """Create a new experiment row."""
         body: dict[str, Any] = {
             ExperimentColumns.CODE: code,
-            ExperimentColumns.STUDIES: study_id,
             ExperimentColumns.STATUS: status.value,
         }
-        if dataset_id is not None:
-            body[ExperimentColumns.DATASET] = dataset_id
         if notes is not None:
             body[ExperimentColumns.NOTES] = notes
+        # 1. Create the row without LTAR fields (see datasets.create for why).
         self._http.records_create(self._table_id, body)
-        # NocoDB v2's POST response sometimes contains only {"Id": N} rather
-        # than the full row — re-fetch by the just-written code to get a
-        # complete Experiment reliably.
-        return self.get_by_code(code)
+        # 2. Re-fetch by code: NocoDB's POST response can be partial.
+        exp = self.get_by_code(code)
+        # 3. Set link fields via the dedicated /links/ endpoint.
+        self._link(ExperimentColumns.STUDIES, exp.id, study_id)
+        if dataset_id is not None:
+            self._link(ExperimentColumns.DATASET, exp.id, dataset_id)
+        return exp
 
     def update_status(self, experiment_id: int, status: Status) -> None:
         """Change an experiment's status."""
