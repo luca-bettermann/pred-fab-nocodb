@@ -126,6 +126,49 @@ def test_write_does_not_send_link_fields_in_records_create(fake_http):
     assert ParamColumns.DIM not in body
 
 
+# ─── Idempotent upsert ──────────────────────────────────────────────────
+
+
+def test_write_is_idempotent_on_repeat(fake_http):
+    """Same row code → no duplicate row, value gets updated in place."""
+    _dim, params = _make_clients(fake_http)
+    params.write(
+        exp_id=1, exp_code="ADVEI/exp_001",
+        value_code="path_offset", value="2.5",
+    )
+    params.write(
+        exp_id=1, exp_code="ADVEI/exp_001",
+        value_code="path_offset", value="3.0",
+    )
+    rows = fake_http.get_records("set_exp_params")
+    assert len(rows) == 1
+    assert rows[0][ParamColumns.VALUE] == "3.0"
+
+
+def test_write_batch_is_idempotent_on_repeat(fake_http):
+    """Repeating a write_batch with the same row codes updates rather than duplicates."""
+    _dim, params = _make_clients(fake_http)
+    items = [
+        ValueWriteItem(value_code="V_fab", value="0.005",
+                       domain="structural", axes={"layer_idx": 0}),
+        ValueWriteItem(value_code="V_fab", value="0.006",
+                       domain="structural", axes={"layer_idx": 1}),
+    ]
+    params.write_batch(exp_id=1, exp_code="ADVEI/exp_001", items=items)
+    # Same items, different values
+    items2 = [
+        ValueWriteItem(value_code="V_fab", value="0.007",
+                       domain="structural", axes={"layer_idx": 0}),
+        ValueWriteItem(value_code="V_fab", value="0.008",
+                       domain="structural", axes={"layer_idx": 1}),
+    ]
+    params.write_batch(exp_id=1, exp_code="ADVEI/exp_001", items=items2)
+    rows = fake_http.get_records("set_exp_params")
+    assert len(rows) == 2
+    values = sorted(r[ParamColumns.VALUE] for r in rows)
+    assert values == ["0.007", "0.008"]
+
+
 def test_read_static_filters_to_null_dim(fake_http):
     _dim, params = _make_clients(fake_http)
     fake_http.set_records(

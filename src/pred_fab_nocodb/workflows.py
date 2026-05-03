@@ -97,7 +97,7 @@ class WorkflowsClient:
         if dataset_code is not None:
             dataset_id = self._c.datasets.get_by_code(dataset_code).id
 
-        exp = self._c.experiments.create(
+        exp = self._c.experiments.upsert(
             study_id=study.id,
             code=exp_code,
             status=Status.DRAFT,

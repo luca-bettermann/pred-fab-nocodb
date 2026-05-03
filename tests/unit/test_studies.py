@@ -26,7 +26,7 @@ def test_get_by_code_raises_when_absent(fake_http):
 
 def test_create_writes_row(fake_http):
     client = StudiesClient(fake_http, base_id="b1", table_id="studies")
-    client.create(code="ADVEI_2026", description="Curved-wall study")
+    client.upsert(code="ADVEI_2026", description="Curved-wall study")
     rows = fake_http.get_records("studies")
     assert len(rows) == 1
     assert rows[0][StudyColumns.CODE] == "ADVEI_2026"
@@ -74,3 +74,36 @@ def test_pull_schema_returns_none_when_empty(fake_http):
     client = StudiesClient(fake_http, base_id="b1", table_id="studies")
     study_id = fake_http.get_records("studies")[0]["Id"]
     assert client.pull_schema(study_id) is None
+
+
+# ─── Idempotent upsert ──────────────────────────────────────────────────
+
+
+def test_upsert_creates_when_absent(fake_http):
+    fake_http.set_records("studies", [])
+    client = StudiesClient(fake_http, base_id="b1", table_id="studies")
+    study = client.upsert(code="ADVEI_2026", description="initial")
+    assert study.code == "ADVEI_2026"
+    assert study.description == "initial"
+    assert len(fake_http.get_records("studies")) == 1
+
+
+def test_upsert_updates_when_present(fake_http):
+    fake_http.set_records(
+        "studies",
+        [{StudyColumns.CODE: "ADVEI_2026", StudyColumns.DESCRIPTION: "old"}],
+    )
+    client = StudiesClient(fake_http, base_id="b1", table_id="studies")
+    study = client.upsert(code="ADVEI_2026", description="updated")
+    assert study.description == "updated"
+    # No duplicate row was created
+    assert len(fake_http.get_records("studies")) == 1
+
+
+def test_upsert_idempotent_repeated_calls(fake_http):
+    fake_http.set_records("studies", [])
+    client = StudiesClient(fake_http, base_id="b1", table_id="studies")
+    client.upsert(code="ADVEI_2026", description="x")
+    client.upsert(code="ADVEI_2026", description="x")
+    client.upsert(code="ADVEI_2026", description="x")
+    assert len(fake_http.get_records("studies")) == 1

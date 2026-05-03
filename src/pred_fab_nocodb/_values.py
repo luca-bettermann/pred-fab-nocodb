@@ -78,27 +78,35 @@ class ValueClient(_BaseTableClient):
         domain: Optional[str] = None,
         axes: Optional[Mapping[str, int]] = None,
     ) -> ValueRow:
-        """Write a single value.
+        """Upsert a single value, keyed by the derived row code.
 
-        If `axes` is provided, `domain` must also be provided; the
-        corresponding `dim_position` is upserted via the shared
-        `DimPositionsClient`. If `axes` is `None`, the row's `dim` link
-        stays null (per-experiment scope).
+        If a row already exists at the same ``(exp_code, value_code, dim_code)``
+        composite, its ``value`` is patched; otherwise a new row is inserted.
+        Link fields (``experiment``, ``dim``) are re-asserted via the /links/
+        endpoint regardless — NocoDB treats re-linking the same target as a
+        no-op.
+
+        If ``axes`` is provided, ``domain`` must also be provided; the
+        corresponding ``dim_position`` is upserted via the shared
+        ``DimPositionsClient``. If ``axes`` is ``None``, the row's ``dim``
+        link stays null (per-experiment scope).
         """
         dim_id, dim_code = self._resolve_dim(domain=domain, axes=axes)
         row_code = make_value_code(exp_code=exp_code, value_code=value_code, dim_code=dim_code)
-        body = self._build_body(
-            row_code=row_code,
-            value_code=value_code,
-            value=value,
-        )
-        # 1. Create the row without LTAR fields (NocoDB v2 silently drops
-        #    inline link values, especially in bulk POSTs).
-        self._http.records_create(self._table_id, body)
-        # 2. Re-fetch by code to get the new row's id (POST response may be partial).
-        row = self._lookup_by_code(row_code)
+
+        existing = self._try_lookup_by_code(row_code)
+        if existing is None:
+            insert_body = self._build_body(
+                row_code=row_code, value_code=value_code, value=value,
+            )
+            self._http.records_create(self._table_id, insert_body)
+            row = self._lookup_by_code(row_code)
+        else:
+            update_body = {ParamColumns.ID: int(existing[ParamColumns.ID]), ParamColumns.VALUE: value}
+            self._http.records_update(self._table_id, update_body)
+            row = self._lookup_by_code(row_code)
+
         record_id = int(row[ParamColumns.ID])
-        # 3. Wire links via the dedicated /links/ endpoint.
         self._link(ParamColumns.EXPERIMENT, record_id, exp_id)
         if dim_id is not None:
             self._link(ParamColumns.DIM, record_id, dim_id)
@@ -111,41 +119,58 @@ class ValueClient(_BaseTableClient):
         exp_code: str,
         items: list[ValueWriteItem],
     ) -> list[ValueRow]:
-        """Bulk-create rows, then wire LTAR links via the /links/ endpoint.
+        """Upsert each row, batching inserts but updating individually.
 
-        NocoDB v2's bulk records-create silently drops link-field values
-        from the body, so we keep `experiment` and `dim` out of the bulk
-        POST and wire them afterwards via the dedicated /links/ endpoint.
-        Cost: 1 bulk records-create + 2N link calls per batch — but the
-        link columns reliably populate, regardless of single vs bulk.
+        Splits items by whether their derived row code already exists:
+          - new rows go into a single bulk records-create
+          - existing rows get individual records-update PATCHes
+        Link fields are re-asserted afterwards via the /links/ endpoint
+        (NocoDB v2's records endpoint silently drops link-field values
+        regardless of single vs bulk; the /links/ path is the only
+        reliable wire).
         """
         if not items:
             return []
-        # Resolve dims (cached) and build value-only bodies for the bulk POST.
-        bodies: list[dict[str, Any]] = []
-        per_row_dim_ids: list[Optional[int]] = []
+        # Resolve dims (cached) and pre-compute the row code for every item.
+        per_item_dim_ids: list[Optional[int]] = []
         row_codes: list[str] = []
         for item in items:
             dim_id, dim_code = self._resolve_dim(domain=item.domain, axes=item.axes)
-            row_code = make_value_code(
-                exp_code=exp_code, value_code=item.value_code, dim_code=dim_code,
-            )
-            bodies.append(
-                self._build_body(
-                    row_code=row_code,
-                    value_code=item.value_code,
-                    value=item.value,
+            row_codes.append(
+                make_value_code(
+                    exp_code=exp_code, value_code=item.value_code, dim_code=dim_code,
                 )
             )
-            per_row_dim_ids.append(dim_id)
-            row_codes.append(row_code)
+            per_item_dim_ids.append(dim_id)
 
-        # 1. Bulk-create. Response shape varies; we re-fetch by code below.
-        self._http.records_create(self._table_id, bodies)
+        # Partition into "new" (bulk insert) vs "existing" (per-row update).
+        insert_bodies: list[dict[str, Any]] = []
+        update_bodies: list[dict[str, Any]] = []
+        for item, row_code in zip(items, row_codes):
+            existing = self._try_lookup_by_code(row_code)
+            if existing is None:
+                insert_bodies.append(
+                    self._build_body(
+                        row_code=row_code,
+                        value_code=item.value_code,
+                        value=item.value,
+                    )
+                )
+            else:
+                update_bodies.append({
+                    ParamColumns.ID: int(existing[ParamColumns.ID]),
+                    ParamColumns.VALUE: item.value,
+                })
 
-        # 2. Re-fetch each row to get its assigned id, then set the LTAR links.
+        if insert_bodies:
+            self._http.records_create(self._table_id, insert_bodies)
+        if update_bodies:
+            # records_update accepts a list for bulk PATCH.
+            self._http.records_update(self._table_id, update_bodies)
+
+        # Re-fetch every row to get the (now-stable) ids, then assert links.
         results: list[ValueRow] = []
-        for row_code, dim_id in zip(row_codes, per_row_dim_ids):
+        for row_code, dim_id in zip(row_codes, per_item_dim_ids):
             row = self._lookup_by_code(row_code)
             record_id = int(row[ParamColumns.ID])
             self._link(ParamColumns.EXPERIMENT, record_id, exp_id)
@@ -153,6 +178,15 @@ class ValueClient(_BaseTableClient):
                 self._link(ParamColumns.DIM, record_id, dim_id)
             results.append(self._row_to_value(self._lookup_by_code(row_code)))
         return results
+
+    def _try_lookup_by_code(self, row_code: str) -> Optional[dict[str, Any]]:
+        """Like `_lookup_by_code` but returns None instead of raising."""
+        rows = self._http.records_list(
+            self._table_id,
+            where=f"({ParamColumns.CODE},eq,{row_code})",
+            limit=1,
+        )
+        return rows[0] if rows else None
 
     # ─── Read ─────────────────────────────────────────────────────────
 

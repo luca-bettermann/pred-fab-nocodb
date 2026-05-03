@@ -55,7 +55,7 @@ class DatasetsClient(_BaseTableClient):
         )
         return [_row_to_dataset(r) for r in rows]
 
-    def create(
+    def upsert(
         self,
         *,
         study_id: int,
@@ -65,26 +65,41 @@ class DatasetsClient(_BaseTableClient):
         purpose: Purpose,
         description: Optional[str] = None,
     ) -> Dataset:
-        """Create a new dataset row.
+        """Create or update a dataset row, keyed by the derived code.
 
-        `study_code` is required for code generation; `study_id` is the FK target.
+        If a dataset already exists at ``{study_code}/{name}``, its
+        non-LTAR fields are patched and the study link is re-asserted
+        (idempotent); otherwise a new row is inserted. ``study_code`` is
+        required for code generation; ``study_id`` is the FK target.
         """
         code = make_dataset_code(study_code, name)
         body: dict[str, Any] = {
-            DatasetColumns.CODE: code,
             DatasetColumns.NAME: name,
             DatasetColumns.STRATEGY: strategy.value,
             DatasetColumns.PURPOSE: purpose.value,
         }
         if description is not None:
             body[DatasetColumns.DESCRIPTION] = description
-        # 1. Create the row without LTAR fields. NocoDB v2 silently drops
-        #    inline link values from records-create bodies (esp. on bulk),
-        #    so links go through the dedicated /links/ endpoint below.
-        self._http.records_create(self._table_id, body)
-        # 2. Re-fetch by code: NocoDB's POST response can be partial.
-        dataset = self.get_by_code(code)
-        # 3. Set the study link via NocoDB's /links/ endpoint.
+
+        try:
+            existing = self.get_by_code(code)
+        except NotFoundError:
+            existing = None
+
+        if existing is None:
+            # 1. Create the row without LTAR fields (NocoDB v2 silently drops
+            #    inline link values from records-create bodies).
+            insert_body = {DatasetColumns.CODE: code, **body}
+            self._http.records_create(self._table_id, insert_body)
+            # 2. Re-fetch by code: POST response can be partial.
+            dataset = self.get_by_code(code)
+        else:
+            update_body = {DatasetColumns.ID: existing.id, **body}
+            self._http.records_update(self._table_id, update_body)
+            dataset = self.get_by_code(code)
+
+        # 3. Set / re-assert the study link via the /links/ endpoint.
+        #    NocoDB treats re-linking the same target as idempotent.
         self._link(DatasetColumns.STUDY, dataset.id, study_id)
         return dataset
 

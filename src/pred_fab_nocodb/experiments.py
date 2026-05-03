@@ -59,7 +59,7 @@ class ExperimentsClient(_BaseTableClient):
         )
         return [_row_to_experiment(r) for r in rows]
 
-    def create(
+    def upsert(
         self,
         *,
         study_id: int,
@@ -68,18 +68,32 @@ class ExperimentsClient(_BaseTableClient):
         dataset_id: Optional[int] = None,
         notes: Optional[str] = None,
     ) -> Experiment:
-        """Create a new experiment row."""
-        body: dict[str, Any] = {
-            ExperimentColumns.CODE: code,
-            ExperimentColumns.STATUS: status.value,
-        }
+        """Create or update an experiment row, keyed by ``code``.
+
+        If a row with this ``code`` already exists, its non-LTAR fields
+        (``status`` and ``notes``) are patched and both link fields
+        (``studies`` + ``dataset``) are re-asserted (idempotent). Otherwise
+        a new row is inserted.
+        """
+        body: dict[str, Any] = {ExperimentColumns.STATUS: status.value}
         if notes is not None:
             body[ExperimentColumns.NOTES] = notes
-        # 1. Create the row without LTAR fields (see datasets.create for why).
-        self._http.records_create(self._table_id, body)
-        # 2. Re-fetch by code: NocoDB's POST response can be partial.
-        exp = self.get_by_code(code)
-        # 3. Set link fields via the dedicated /links/ endpoint.
+
+        try:
+            existing = self.get_by_code(code)
+        except NotFoundError:
+            existing = None
+
+        if existing is None:
+            insert_body = {ExperimentColumns.CODE: code, **body}
+            self._http.records_create(self._table_id, insert_body)
+            exp = self.get_by_code(code)
+        else:
+            update_body = {ExperimentColumns.ID: existing.id, **body}
+            self._http.records_update(self._table_id, update_body)
+            exp = self.get_by_code(code)
+
+        # Set / re-assert link fields via the /links/ endpoint (idempotent).
         self._link(ExperimentColumns.STUDIES, exp.id, study_id)
         if dataset_id is not None:
             self._link(ExperimentColumns.DATASET, exp.id, dataset_id)

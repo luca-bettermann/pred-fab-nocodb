@@ -41,20 +41,35 @@ class StudiesClient(_BaseTableClient):
         rows = self._http.records_list(self._table_id)
         return [_row_to_study(r) for r in rows]
 
-    def create(
+    def upsert(
         self,
         *,
         code: str,
         description: Optional[str] = None,
     ) -> Study:
-        """Create a new study row."""
-        body: dict[str, Any] = {StudyColumns.CODE: code}
+        """Create or update a study row, keyed by ``code``.
+
+        If a row with this ``code`` already exists, ``description`` (when
+        provided) is patched; otherwise a new row is inserted. Returns the
+        canonical row via re-fetch.
+        """
+        body: dict[str, Any] = {}
         if description is not None:
             body[StudyColumns.DESCRIPTION] = description
-        self._http.records_create(self._table_id, body)
-        # NocoDB v2's POST response sometimes contains only {"Id": N} rather
-        # than the full row — re-fetch by the just-written code to get a
-        # complete Study reliably.
+
+        try:
+            existing = self.get_by_code(code)
+        except NotFoundError:
+            existing = None
+
+        if existing is None:
+            insert_body = {StudyColumns.CODE: code, **body}
+            self._http.records_create(self._table_id, insert_body)
+        elif body:
+            update_body = {StudyColumns.ID: existing.id, **body}
+            self._http.records_update(self._table_id, update_body)
+
+        # POST/PATCH responses are sometimes partial; re-fetch.
         return self.get_by_code(code)
 
     def push_schema(self, study_id: int, schema: dict[str, Any]) -> None:
