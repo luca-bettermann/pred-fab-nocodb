@@ -159,22 +159,25 @@ def _row_counts(ws: _Workspace) -> dict[str, int]:
 # ─── Idempotency tests ──────────────────────────────────────────────────
 
 
-def test_push_study_definition_idempotent(workspace):
+def test_push_schema_and_constants_idempotent(workspace):
+    """`studies.push_schema` + `study_constants.write_batch` are each idempotent;
+    composed they leave NocoDB in a stable state across repeated calls."""
     schema = {"schema_id": "ADVEI_2026", "parameters": {"V_fab": [0.005, 0.01]}}
     constants = {"W_filament": 0.007, "component_height_mm": 25.0}
+    study = workspace.studies.get_by_code("ADVEI_2026")
 
-    workspace.workflows.push_study_definition(
-        study_code="ADVEI_2026", schema=schema, constants=constants,
-    )
+    def _push() -> None:
+        workspace.studies.push_schema(study.id, schema)
+        workspace.study_constants.write_batch(
+            study_id=study.id, study_code="ADVEI_2026", constants=constants,
+        )
+
+    _push()
     after_first = _row_counts(workspace)
-
-    workspace.workflows.push_study_definition(
-        study_code="ADVEI_2026", schema=schema, constants=constants,
-    )
+    _push()
     after_second = _row_counts(workspace)
 
     assert after_first == after_second
-    # Specifically: schema row stays singular, constants stay at 2.
     assert after_second[Tables.STUDIES] == 1
     assert after_second[Tables.SET_STUDY_CONSTANTS] == 2
 
@@ -274,7 +277,7 @@ def test_save_fabrication_result_idempotent(workspace):
 
 
 def test_full_round_trip_idempotent(workspace):
-    """push_study_definition -> plan_experiment -> save_fabrication_result, twice."""
+    """push_schema (+ constants) -> plan_experiment -> save_fabrication_result, twice."""
     schema = {"schema_id": "ADVEI_2026"}
     constants = {"W_filament": 0.007}
     plan = ExperimentPlan(
@@ -297,8 +300,10 @@ def test_full_round_trip_idempotent(workspace):
     ]
 
     def _run() -> None:
-        workspace.workflows.push_study_definition(
-            study_code="ADVEI_2026", schema=schema, constants=constants,
+        study = workspace.studies.get_by_code("ADVEI_2026")
+        workspace.studies.push_schema(study.id, schema)
+        workspace.study_constants.write_batch(
+            study_id=study.id, study_code="ADVEI_2026", constants=constants,
         )
         workspace.datasets.upsert(
             study_id=workspace.studies.get_by_code("ADVEI_2026").id,

@@ -93,35 +93,6 @@ class WorkflowsClient:
     def __init__(self, client: "NocoDBClient"):
         self._c = client
 
-    # ─── Push study definition ────────────────────────────────────────
-
-    def push_study_definition(
-        self,
-        *,
-        study_code: str,
-        schema: dict[str, Any],
-        constants: Optional[Mapping[str, float]] = None,
-    ) -> int:
-        """Push a study's full definition: schema JSON + (optional) constants.
-
-        One call replaces the manual sequence of ``studies.push_schema`` +
-        ``study_constants.write`` per key. Idempotent — overwrites
-        ``studies.schema`` and upserts every key in ``constants``. Constants
-        already in NocoDB but absent from ``constants`` are left alone (no
-        deletion).
-
-        Returns the study id for downstream use.
-        """
-        study = self._c.studies.get_by_code(study_code)
-        self._c.studies.push_schema(study.id, schema)
-        if constants:
-            self._c.study_constants.write_batch(
-                study_id=study.id,
-                study_code=study.code,
-                constants=constants,
-            )
-        return study.id
-
     # ─── Plan ─────────────────────────────────────────────────────────
 
     def plan_experiment(
