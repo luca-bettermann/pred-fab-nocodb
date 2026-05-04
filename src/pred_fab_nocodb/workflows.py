@@ -42,6 +42,25 @@ class FabricationLoad:
     trajectory_params: dict[str, list[tuple[dict[str, int], Any]]]
     sparse_trajectories: dict[str, dict[int, Any]] = field(default_factory=dict)
 
+    def as_overrides(self) -> dict[str, Any]:
+        """Flatten study_constants + static_params + sparse_trajectories
+        into one dict suitable for ``params.update(load.as_overrides())``
+        on the fab-script side.
+
+        Precedence (later wins):
+          ``study_constants`` ⟶ ``static_params`` ⟶ ``sparse_trajectories``
+
+        Trajectory entries appear as ``{step_index: value}`` dicts —
+        consumers densify them to a list themselves if they need that
+        shape. (This mirrors the design split we already made when
+        ``densify`` got replaced by ``project_to_dimension``.)
+        """
+        return {
+            **self.study_constants,
+            **self.static_params,
+            **self.sparse_trajectories,
+        }
+
 
 @dataclass(frozen=True)
 class ExperimentBundle:

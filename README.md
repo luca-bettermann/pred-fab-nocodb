@@ -93,7 +93,7 @@ Same shape — `ValueClient` parameterised per table.
 | Method | Description |
 |---|---|
 | `plan_experiment(*, study_code, exp_code, plan, dataset_code=None, domain=None)` | Create draft experiment + write all params in one shot |
-| `load_for_fabrication(*, exp_code, mark_running=True, schedule_dim=None)` | Read everything a fab script needs; optionally transitions DRAFT → RUNNING. Pass `schedule_dim` (e.g. `"layer_idx"`) to populate `FabricationLoad.sparse_trajectories` — `{param_code: {step_index: value, …}}`. The consumer chooses how to interpret the sparse map (carry-forward, interpolate, …). |
+| `load_for_fabrication(*, exp_code, mark_running=True, schedule_dim=None)` | Read everything a fab script needs; optionally transitions DRAFT → RUNNING. Pass `schedule_dim` (e.g. `"layer_idx"`) to populate `FabricationLoad.sparse_trajectories` — `{param_code: {step_index: value, …}}`. The consumer chooses how to interpret the sparse map (carry-forward, interpolate, …). The returned `FabricationLoad.as_overrides()` flattens `study_constants` + `static_params` + `sparse_trajectories` into one dict (last wins) for `params.update(load.as_overrides())` on the fab-script side. |
 | `save_fabrication_result(*, exp_code, status=DONE, features=None, attributes=None, ended_at=None, notes=None)` | Bulk-write features + attributes, transition status |
 | `load_dataset(*, dataset_code, only_done=False)` | Bundle all experiments in a dataset for training |
 | `purge_dataset(dataset_code)` | Delete a dataset, its experiments, and every per-experiment value row. Idempotent; intended for re-plan flows that need a clean slate. Returns per-table delete counts. |

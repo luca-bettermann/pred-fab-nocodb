@@ -140,3 +140,57 @@ def test_load_for_fabrication_propagates_validation_errors():
         workflows.load_for_fabrication(
             exp_code="exp1", mark_running=False, schedule_dim="layer_idx",
         )
+
+
+# ─── FabricationLoad.as_overrides ───────────────────────────────────────
+
+
+def test_as_overrides_merges_constants_static_and_sparse():
+    client = _FakeClient()
+    _seed_basic(client)  # static + trajectory
+    client.study_constants.by_study[42] = {"component_height": 25, "water_ratio": 0.25}
+    workflows = WorkflowsClient(client)  # type: ignore[arg-type]
+    load = workflows.load_for_fabrication(
+        exp_code="exp1", mark_running=False, schedule_dim="layer_idx",
+    )
+    overrides = load.as_overrides()
+    # Constants present
+    assert overrides["component_height"] == 25
+    assert overrides["water_ratio"] == 0.25
+    # Static present
+    assert overrides["path_offset"] == 1.5
+    assert overrides["layer_height"] == 3.0
+    # Sparse trajectory present, in {step: value} shape
+    assert overrides["print_speed"] == {0: 0.005, 3: 0.006, 7: 0.008}
+
+
+def test_as_overrides_precedence_trajectory_over_static_over_constants():
+    """Same key in multiple buckets: trajectory > static > constants."""
+    client = _FakeClient()
+    client.experiments.by_code["exp1"] = _FakeExp(id=1, code="exp1", study_id=42)
+    client.study_constants.by_study[42] = {"shared": "from_constants"}
+    client.params.static[1] = {"shared": "from_static"}
+    client.params.trajectory[1] = {
+        "shared": [({"layer_idx": 0}, "from_trajectory")],
+    }
+    workflows = WorkflowsClient(client)  # type: ignore[arg-type]
+    load = workflows.load_for_fabrication(
+        exp_code="exp1", mark_running=False, schedule_dim="layer_idx",
+    )
+    overrides = load.as_overrides()
+    # Trajectory wins (it's a dict, not the constant string)
+    assert overrides["shared"] == {0: "from_trajectory"}
+
+
+def test_as_overrides_with_no_sparse_returns_constants_plus_static_only():
+    client = _FakeClient()
+    _seed_basic(client)
+    client.study_constants.by_study[42] = {"component_height": 25}
+    workflows = WorkflowsClient(client)  # type: ignore[arg-type]
+    # No schedule_dim → sparse_trajectories empty
+    load = workflows.load_for_fabrication(exp_code="exp1", mark_running=False)
+    overrides = load.as_overrides()
+    assert overrides["component_height"] == 25
+    assert overrides["path_offset"] == 1.5
+    # `print_speed` not in overrides since sparse is empty
+    assert "print_speed" not in overrides
