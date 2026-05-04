@@ -188,6 +188,71 @@ def test_push_schema_and_constants_idempotent(workspace):
     assert json.loads(studies_rows[0][StudyColumns.SCHEMA]) == schema
 
 
+def test_advei_grid_plan_writes_sparse_param_rows(workspace):
+    """Regression test for sparse trajectory writes (lbp's _build_plan shape).
+
+    ADVEI grid datasets emit ONE :class:`ParameterUpdateEvent` at
+    ``layer_idx=0`` carrying every trajectory param's value (constant
+    within a print, rtde carry-forwards through subsequent layers).
+    ``plan_experiment`` must turn that into one NocoDB row per param
+    code in the event, NOT n_layers rows. Total per experiment:
+    ``len(static_params) + sum(len(event.updates) for event in events)``
+    — independent of how many layers the experiment has.
+    """
+    workspace.datasets.upsert(
+        study_id=workspace.studies.get_by_code("ADVEI_2026").id,
+        study_code="ADVEI_2026", name="reference",
+        strategy=Strategy.GRID, purpose=Purpose.REFERENCE,
+    )
+
+    # Shape mirrors what lbp's _build_plan emits for a grid experiment:
+    # 4 static params (3 design + derived N_layers) + 1 event with both
+    # trajectory params bundled at layer_idx=0.
+    plan = ExperimentPlan(
+        static_params={
+            "pathOffset": 1.5, "H_layer": 2.5,
+            "calibrationFactor": 1.9, "N_layers": 10,
+        },
+        parameter_updates=[
+            ParameterUpdateEvent(
+                updates={"V_fab": 0.006, "slowdownFactor": 0.45},
+                dimension="layer_idx", step_index=0,
+            ),
+        ],
+    )
+    workspace.workflows.plan_experiment(
+        study_code="ADVEI_2026",
+        exp_code="ADVEI_2026/reference/000",
+        plan=plan,
+        dataset_code="ADVEI_2026/reference",
+        domain="structural",
+    )
+
+    counts = _row_counts(workspace)
+    assert counts[Tables.SET_EXP_PARAMS] == 6   # 4 static + 2 trajectory; NOT 4 + 2*N_layers
+    assert counts[Tables.DIM_POSITIONS] == 1    # only layer_idx=0
+
+    # Re-running with a *different* N_layers must not change row count —
+    # row count must depend only on event shape, not on N_layers.
+    plan_more_layers = ExperimentPlan(
+        static_params={
+            "pathOffset": 1.5, "H_layer": 2.0,
+            "calibrationFactor": 1.9, "N_layers": 13,
+        },
+        parameter_updates=plan.parameter_updates,
+    )
+    workspace.workflows.plan_experiment(
+        study_code="ADVEI_2026",
+        exp_code="ADVEI_2026/reference/000",
+        plan=plan_more_layers,
+        dataset_code="ADVEI_2026/reference",
+        domain="structural",
+    )
+    counts_after = _row_counts(workspace)
+    assert counts_after[Tables.SET_EXP_PARAMS] == 6
+    assert counts_after[Tables.DIM_POSITIONS] == 1
+
+
 def test_plan_experiment_idempotent(workspace):
     workspace.datasets.upsert(
         study_id=workspace.studies.get_by_code("ADVEI_2026").id,
