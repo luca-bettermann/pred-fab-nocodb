@@ -32,6 +32,7 @@ from pred_fab_nocodb.schema import (
 )
 from pred_fab_nocodb.studies import StudiesClient
 from pred_fab_nocodb.study_constants import StudyConstantsClient
+from pred_fab_nocodb import ParameterUpdateEvent
 from pred_fab_nocodb._values import ValueClient, ValueWriteItem
 from pred_fab_nocodb.workflows import (
     ExperimentPlan,
@@ -198,13 +199,17 @@ def test_plan_experiment_idempotent(workspace):
 
     plan = ExperimentPlan(
         static_params={"calibrationFactor": 1.9, "H_layer": 2.5},
-        trajectory_params={
-            "V_fab": [
-                ({"layer_idx": 0}, 0.005),
-                ({"layer_idx": 1}, 0.006),
-                ({"layer_idx": 2}, 0.007),
-            ],
-        },
+        parameter_updates=[
+            ParameterUpdateEvent(
+                updates={"V_fab": 0.005}, dimension="layer_idx", step_index=0,
+            ),
+            ParameterUpdateEvent(
+                updates={"V_fab": 0.006}, dimension="layer_idx", step_index=1,
+            ),
+            ParameterUpdateEvent(
+                updates={"V_fab": 0.007}, dimension="layer_idx", step_index=2,
+            ),
+        ],
     )
     workspace.workflows.plan_experiment(
         study_code="ADVEI_2026",
@@ -282,12 +287,14 @@ def test_full_round_trip_idempotent(workspace):
     constants = {"W_filament": 0.007}
     plan = ExperimentPlan(
         static_params={"calibrationFactor": 1.9, "H_layer": 2.5},
-        trajectory_params={
-            "V_fab": [
-                ({"layer_idx": 0}, 0.005),
-                ({"layer_idx": 1}, 0.006),
-            ],
-        },
+        parameter_updates=[
+            ParameterUpdateEvent(
+                updates={"V_fab": 0.005}, dimension="layer_idx", step_index=0,
+            ),
+            ParameterUpdateEvent(
+                updates={"V_fab": 0.006}, dimension="layer_idx", step_index=1,
+            ),
+        ],
     )
     features = [
         ValueWriteItem(

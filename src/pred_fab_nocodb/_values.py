@@ -10,8 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
+from pred_fab.core.events import ParameterUpdateEvent
+
 from ._base import _BaseTableClient
 from ._codes import make_value_code
+from .errors import ValidationError
 from .schema import ParamColumns
 
 if TYPE_CHECKING:
@@ -229,10 +232,12 @@ class ValueClient(_BaseTableClient):
         self,
         exp_code: str,
     ) -> dict[str, list[tuple[dict[str, int], Any]]]:
-        """Every value where `dim` is populated, grouped by code.
+        """Every value where ``dim`` is populated, grouped by code.
 
-        Returns `{value_code: [(axes, value), ...]}`. For `set_exp_params`,
-        useful for retrieving per-layer trajectories.
+        Returns ``{value_code: [(axes, value), ...]}``. Used for features and
+        attributes where multi-axis positions are valid. For params, prefer
+        :meth:`read_parameter_updates` which projects to pred-fab's
+        canonical single-axis :class:`ParameterUpdateEvent` shape.
 
         Uses NocoDB v2's ``notblank`` operator (LTAR-aware null check); a
         client-side ``dim_id is None`` skip remains as belt-and-suspenders.
@@ -255,6 +260,62 @@ class ValueClient(_BaseTableClient):
             position = self._dim_client.get(dim_id)
             out.setdefault(code, []).append((dict(position.axes), r[ParamColumns.VALUE]))
         return out
+
+    def read_parameter_updates(self, exp_code: str) -> list[ParameterUpdateEvent]:
+        """Every value where ``dim`` is populated, grouped into sparse events.
+
+        Rows sharing the same dim_position collapse into one
+        :class:`ParameterUpdateEvent` whose ``updates`` dict bundles every
+        ``(value_code, value)`` at that step. Each row's dim_position must
+        be single-axis; multi-axis positions raise ``ValidationError`` since
+        the canonical ``ParameterUpdateEvent`` carries one ``(dimension,
+        step_index)`` pair only.
+
+        Use this on the params client; features and attributes (which may
+        carry multi-axis positions like ``{layer_idx, node_idx}``) should
+        go through :meth:`read_trajectory` instead.
+
+        Returns events sorted by ``(dimension, step_index)``. The shape is
+        the same one pred-fab uses internally
+        (``ExperimentData.parameter_updates``), so the two layers exchange
+        events directly without translation.
+        """
+        rows = self._http.records_list(
+            self._table_id,
+            where=(
+                f"({ParamColumns.EXPERIMENT},eq,{exp_code})"
+                f"~and({ParamColumns.DIM},notblank,)"
+            ),
+        )
+        by_dim: dict[int, dict[str, Any]] = {}
+        for r in rows:
+            code = str(r.get(self._fk_col, ""))
+            if not code:
+                continue
+            dim_id = self._extract_dim_id(r.get(ParamColumns.DIM))
+            if dim_id is None:
+                continue
+            by_dim.setdefault(dim_id, {})[code] = r[ParamColumns.VALUE]
+
+        events: list[ParameterUpdateEvent] = []
+        for dim_id, updates in by_dim.items():
+            position = self._dim_client.get(dim_id)
+            if len(position.axes) != 1:
+                raise ValidationError(
+                    f"dim_position {position.code!r} is multi-axis "
+                    f"({position.axes!r}); cannot project onto a single-axis "
+                    "ParameterUpdateEvent."
+                )
+            dim, step = next(iter(position.axes.items()))
+            events.append(
+                ParameterUpdateEvent(
+                    updates=dict(updates),
+                    dimension=dim,
+                    step_index=int(step),
+                )
+            )
+        events.sort(key=lambda e: (e.dimension or "", e.step_index or 0))
+        return events
 
     # ─── Internal ──────────────────────────────────────────────────────
 

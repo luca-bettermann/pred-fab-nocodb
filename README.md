@@ -86,14 +86,14 @@ Same shape — `ValueClient` parameterised per table.
 | `write_batch(*, exp_id, exp_code, items)` | Bulk write; reuses dim cache |
 | `read(*, exp_id, value_code=None)` | All rows for an experiment |
 | `read_static(exp_id)` | Per-experiment values (`dim IS NULL`) as `{code: value}` |
-| `read_trajectory(exp_id)` | Per-position values grouped by code |
+| `read_parameter_updates(exp_id)` | Sparse per-step events as `list[ParameterUpdateEvent]` (params client only) |
 
 ### `client.workflows`
 
 | Method | Description |
 |---|---|
 | `plan_experiment(*, study_code, exp_code, plan, dataset_code=None, domain=None)` | Create draft experiment + write all params in one shot |
-| `load_for_fabrication(*, exp_code, mark_running=True, schedule_dim=None)` | Read everything a fab script needs; optionally transitions DRAFT → RUNNING. Pass `schedule_dim` (e.g. `"layer_idx"`) to populate `FabricationLoad.sparse_trajectories` — `{param_code: {step_index: value, …}}`. The consumer chooses how to interpret the sparse map (carry-forward, interpolate, …). The returned `FabricationLoad.as_overrides()` flattens `study_constants` + `static_params` + `sparse_trajectories` into one dict (last wins) for `params.update(load.as_overrides())` on the fab-script side. |
+| `load_for_fabrication(*, exp_code, mark_running=True)` | Read everything a fab script needs; optionally transitions DRAFT → RUNNING. Returns a `FabricationLoad` with sparse `parameter_updates: list[ParameterUpdateEvent]` — pred-fab's canonical event shape. The consumer projects per-step via `load.as_overrides(schedule_dim="layer_idx")`, which flattens `study_constants` + `static_params` + per-step `{step: value}` dicts (last wins) for `params.update(load.as_overrides(schedule_dim=...))` on the fab-script side. |
 | `save_fabrication_result(*, exp_code, status=DONE, features=None, attributes=None, ended_at=None, notes=None)` | Bulk-write features + attributes, transition status |
 | `load_dataset(*, dataset_code, only_done=False)` | Bundle all experiments in a dataset for training |
 | `purge_dataset(dataset_code)` | Delete a dataset, its experiments, and every per-experiment value row. Idempotent; intended for re-plan flows that need a clean slate. Returns per-table delete counts. |

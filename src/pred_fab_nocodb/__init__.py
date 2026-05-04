@@ -1,4 +1,12 @@
 """pred-fab-nocodb — NocoDB binding for the pred-fab data model."""
+from pred_fab.core.events import (
+    ParameterProposal,
+    ParameterTrajectory,
+    ParameterUpdateEvent,
+    events_to_trajectory,
+    trajectory_to_events,
+)
+
 from ._values import ValueRow, ValueWriteItem
 from .client import NocoDBClient
 from .datasets import Dataset
@@ -40,4 +48,9 @@ __all__ = [
     "ConflictError",
     "SchemaMismatchError",
     "SchemaValidator",
+    "ParameterProposal",
+    "ParameterTrajectory",
+    "ParameterUpdateEvent",
+    "events_to_trajectory",
+    "trajectory_to_events",
 ]

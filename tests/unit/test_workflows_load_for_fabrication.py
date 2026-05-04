@@ -1,10 +1,9 @@
-"""Tests for WorkflowsClient.load_for_fabrication, focused on sparse projection."""
+"""Tests for WorkflowsClient.load_for_fabrication and FabricationLoad.as_overrides."""
 from dataclasses import dataclass, field
 from typing import Any
 
-import pytest
+from pred_fab.core.events import ParameterUpdateEvent
 
-from pred_fab_nocodb.errors import ValidationError
 from pred_fab_nocodb.workflows import WorkflowsClient
 
 
@@ -43,13 +42,13 @@ class _StudyConstantsStub:
 @dataclass
 class _ParamsStub:
     static: dict[str, dict[str, Any]] = field(default_factory=dict)
-    trajectory: dict[str, dict[str, list[tuple[dict[str, int], Any]]]] = field(default_factory=dict)
+    events: dict[str, list[ParameterUpdateEvent]] = field(default_factory=dict)
 
     def read_static(self, exp_code: str) -> dict[str, Any]:
         return self.static.get(exp_code, {})
 
-    def read_trajectory(self, exp_code: str) -> dict[str, list[tuple[dict[str, int], Any]]]:
-        return self.trajectory.get(exp_code, {})
+    def read_parameter_updates(self, exp_code: str) -> list[ParameterUpdateEvent]:
+        return list(self.events.get(exp_code, []))
 
 
 @dataclass
@@ -65,30 +64,23 @@ def _seed_basic(client: _FakeClient) -> None:
     )
     client.study_constants.by_study_code["study_42"] = {"design_height_mm": 30.0}
     client.params.static["exp1"] = {"path_offset": 1.5, "layer_height": 3.0}
-    client.params.trajectory["exp1"] = {
-        "print_speed": [
-            ({"layer_idx": 0}, 0.005),
-            ({"layer_idx": 3}, 0.006),
-            ({"layer_idx": 7}, 0.008),
-        ],
-    }
+    client.params.events["exp1"] = [
+        ParameterUpdateEvent(
+            updates={"print_speed": 0.005}, dimension="layer_idx", step_index=0,
+        ),
+        ParameterUpdateEvent(
+            updates={"print_speed": 0.006}, dimension="layer_idx", step_index=3,
+        ),
+        ParameterUpdateEvent(
+            updates={"print_speed": 0.008}, dimension="layer_idx", step_index=7,
+        ),
+    ]
 
 
-# ─── No schedule_dim → unchanged behaviour ──────────────────────────────
+# ─── load_for_fabrication ──────────────────────────────────────────────────
 
 
-def test_load_for_fabrication_default_returns_empty_sparse_trajectories():
-    client = _FakeClient()
-    _seed_basic(client)
-    workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    load = workflows.load_for_fabrication(exp_code="exp1", mark_running=False)
-    assert load.sparse_trajectories == {}
-    # Raw sparse form (with full axes dicts) preserved
-    assert "print_speed" in load.trajectory_params
-    assert len(load.trajectory_params["print_speed"]) == 3
-
-
-def test_load_for_fabrication_default_preserves_other_payload():
+def test_load_for_fabrication_returns_static_constants_and_events():
     client = _FakeClient()
     _seed_basic(client)
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
@@ -98,108 +90,93 @@ def test_load_for_fabrication_default_preserves_other_payload():
     assert load.study_id == 42
     assert load.study_constants == {"design_height_mm": 30.0}
     assert load.static_params == {"path_offset": 1.5, "layer_height": 3.0}
+    assert len(load.parameter_updates) == 3
+    assert {e.step_index for e in load.parameter_updates} == {0, 3, 7}
+    assert all(e.dimension == "layer_idx" for e in load.parameter_updates)
 
 
-# ─── With schedule_dim → populated sparse_trajectories ──────────────────
-
-
-def test_load_for_fabrication_with_schedule_dim_populates_sparse_trajectories():
-    client = _FakeClient()
-    _seed_basic(client)
-    workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    load = workflows.load_for_fabrication(
-        exp_code="exp1",
-        mark_running=False,
-        schedule_dim="layer_idx",
-    )
-    assert load.sparse_trajectories == {
-        "print_speed": {0: 0.005, 3: 0.006, 7: 0.008},
-    }
-    # Raw sparse form (with full axes dicts) remains intact alongside
-    assert load.trajectory_params["print_speed"]
-
-
-def test_sparse_trajectories_empty_when_no_trajectory_params():
-    """A study with only static params should yield an empty sparse dict, not error."""
+def test_load_for_fabrication_empty_events_when_no_trajectory():
     client = _FakeClient()
     client.experiments.by_code["exp1"] = _FakeExp(
         id=1, code="exp1", study_id=42, study_code="study_42",
     )
     client.params.static["exp1"] = {"path_offset": 1.5}
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    load = workflows.load_for_fabrication(
-        exp_code="exp1",
-        mark_running=False,
-        schedule_dim="layer_idx",
-    )
-    assert load.sparse_trajectories == {}
-
-
-def test_load_for_fabrication_propagates_validation_errors():
-    """A trajectory entry missing the schedule dimension surfaces ValidationError."""
-    client = _FakeClient()
-    client.experiments.by_code["exp1"] = _FakeExp(
-        id=1, code="exp1", study_id=42, study_code="study_42",
-    )
-    client.params.trajectory["exp1"] = {"speed": [({"node_idx": 0}, 0.005)]}
-    workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    with pytest.raises(ValidationError, match="missing dimension"):
-        workflows.load_for_fabrication(
-            exp_code="exp1", mark_running=False, schedule_dim="layer_idx",
-        )
+    load = workflows.load_for_fabrication(exp_code="exp1", mark_running=False)
+    assert load.parameter_updates == []
 
 
 # ─── FabricationLoad.as_overrides ───────────────────────────────────────
 
 
-def test_as_overrides_merges_constants_static_and_sparse():
+def test_as_overrides_merges_constants_static_and_per_step_trajectory():
     client = _FakeClient()
-    _seed_basic(client)  # static + trajectory
-    client.study_constants.by_study_code["study_42"] = {"component_height": 25, "water_ratio": 0.25}
+    _seed_basic(client)  # static + events
+    client.study_constants.by_study_code["study_42"] = {
+        "component_height": 25, "water_ratio": 0.25,
+    }
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    load = workflows.load_for_fabrication(
-        exp_code="exp1", mark_running=False, schedule_dim="layer_idx",
-    )
-    overrides = load.as_overrides()
-    # Constants present
+    load = workflows.load_for_fabrication(exp_code="exp1", mark_running=False)
+    overrides = load.as_overrides(schedule_dim="layer_idx")
     assert overrides["component_height"] == 25
     assert overrides["water_ratio"] == 0.25
-    # Static present
     assert overrides["path_offset"] == 1.5
     assert overrides["layer_height"] == 3.0
-    # Sparse trajectory present, in {step: value} shape
     assert overrides["print_speed"] == {0: 0.005, 3: 0.006, 7: 0.008}
 
 
 def test_as_overrides_precedence_trajectory_over_static_over_constants():
-    """Same key in multiple buckets: trajectory > static > constants."""
     client = _FakeClient()
     client.experiments.by_code["exp1"] = _FakeExp(
         id=1, code="exp1", study_id=42, study_code="study_42",
     )
     client.study_constants.by_study_code["study_42"] = {"shared": "from_constants"}
     client.params.static["exp1"] = {"shared": "from_static"}
-    client.params.trajectory["exp1"] = {
-        "shared": [({"layer_idx": 0}, "from_trajectory")],
-    }
+    client.params.events["exp1"] = [
+        ParameterUpdateEvent(
+            updates={"shared": "from_trajectory"},
+            dimension="layer_idx",
+            step_index=0,
+        ),
+    ]
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    load = workflows.load_for_fabrication(
-        exp_code="exp1", mark_running=False, schedule_dim="layer_idx",
-    )
-    overrides = load.as_overrides()
-    # Trajectory wins (it's a dict, not the constant string)
+    load = workflows.load_for_fabrication(exp_code="exp1", mark_running=False)
+    overrides = load.as_overrides(schedule_dim="layer_idx")
     assert overrides["shared"] == {0: "from_trajectory"}
 
 
-def test_as_overrides_with_no_sparse_returns_constants_plus_static_only():
+def test_as_overrides_drops_events_for_other_dimensions():
+    """`schedule_dim='layer_idx'` filters out events along other axes."""
     client = _FakeClient()
-    _seed_basic(client)
-    client.study_constants.by_study_code["study_42"] = {"component_height": 25}
+    client.experiments.by_code["exp1"] = _FakeExp(
+        id=1, code="exp1", study_id=42, study_code="study_42",
+    )
+    client.params.static["exp1"] = {"path_offset": 1.5}
+    client.params.events["exp1"] = [
+        ParameterUpdateEvent(
+            updates={"foo": 1.0}, dimension="layer_idx", step_index=0,
+        ),
+        ParameterUpdateEvent(
+            updates={"bar": 2.0}, dimension="time_s", step_index=10,
+        ),
+    ]
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
-    # No schedule_dim → sparse_trajectories empty
     load = workflows.load_for_fabrication(exp_code="exp1", mark_running=False)
-    overrides = load.as_overrides()
+    overrides = load.as_overrides(schedule_dim="layer_idx")
+    assert overrides["foo"] == {0: 1.0}
+    assert "bar" not in overrides
+
+
+def test_as_overrides_with_no_events_returns_constants_plus_static_only():
+    client = _FakeClient()
+    client.experiments.by_code["exp1"] = _FakeExp(
+        id=1, code="exp1", study_id=42, study_code="study_42",
+    )
+    client.study_constants.by_study_code["study_42"] = {"component_height": 25}
+    client.params.static["exp1"] = {"path_offset": 1.5}
+    workflows = WorkflowsClient(client)  # type: ignore[arg-type]
+    load = workflows.load_for_fabrication(exp_code="exp1", mark_running=False)
+    overrides = load.as_overrides(schedule_dim="layer_idx")
     assert overrides["component_height"] == 25
     assert overrides["path_offset"] == 1.5
-    # `print_speed` not in overrides since sparse is empty
     assert "print_speed" not in overrides
