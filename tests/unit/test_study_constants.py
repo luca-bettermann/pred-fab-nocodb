@@ -31,7 +31,7 @@ def test_write_updates_when_present(fake_http):
         [{StudyConstantColumns.CODE: "ADVEI/W_filament",
           StudyConstantColumns.PARAM: "W_filament",
           StudyConstantColumns.VALUE: 0.005,
-          "study": 42}],
+          "study": {"Id": 42, "code": "ADVEI"}}],
     )
     client.write(study_id=42, study_code="ADVEI", param_code="W_filament", value=0.007)
     rows = fake_http.get_records("study_constants")
@@ -60,7 +60,7 @@ def test_write_batch_leaves_other_constants_alone(fake_http):
         [{StudyConstantColumns.CODE: "ADVEI/water_ratio",
           StudyConstantColumns.PARAM: "water_ratio",
           StudyConstantColumns.VALUE: 0.25,
-          "study": 42}],
+          "study": {"Id": 42, "code": "ADVEI"}}],
     )
     client.write_batch(
         study_id=42, study_code="ADVEI",
@@ -82,15 +82,15 @@ def test_read_returns_constants_for_study(fake_http):
     fake_http.set_records(
         "study_constants",
         [
-            {StudyConstantColumns.STUDY: 42,
+            {StudyConstantColumns.STUDY: {"Id": 42, "code": "ADVEI"},
              StudyConstantColumns.PARAM: "W_filament",
              StudyConstantColumns.VALUE: 0.007},
-            {StudyConstantColumns.STUDY: 99,
+            {StudyConstantColumns.STUDY: {"Id": 99, "code": "OTHER"},
              StudyConstantColumns.PARAM: "elsewhere",
              StudyConstantColumns.VALUE: 1.0},
         ],
     )
-    result = client.read(study_id=42)
+    result = client.read(study_code="ADVEI")
     assert result == {"W_filament": 0.007}
 
 
@@ -98,15 +98,15 @@ def test_delete_removes_existing(fake_http):
     client = _make_client(fake_http)
     fake_http.set_records(
         "study_constants",
-        [{StudyConstantColumns.STUDY: 42,
+        [{StudyConstantColumns.STUDY: {"Id": 42, "code": "ADVEI"},
           StudyConstantColumns.PARAM: "W_filament",
           StudyConstantColumns.VALUE: 0.007}],
     )
-    client.delete(study_id=42, param_code="W_filament")
+    client.delete(study_code="ADVEI", param_code="W_filament")
     assert fake_http.get_records("study_constants") == []
 
 
 def test_delete_raises_when_absent(fake_http):
     client = _make_client(fake_http)
     with pytest.raises(NotFoundError):
-        client.delete(study_id=42, param_code="missing")
+        client.delete(study_code="ADVEI", param_code="missing")

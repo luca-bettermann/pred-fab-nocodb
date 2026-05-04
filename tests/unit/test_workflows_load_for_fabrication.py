@@ -13,6 +13,7 @@ class _FakeExp:
     id: int
     code: str
     study_id: int
+    study_code: str = ""
 
 
 @dataclass
@@ -33,22 +34,22 @@ class _ExperimentsStub:
 
 @dataclass
 class _StudyConstantsStub:
-    by_study: dict[int, dict[str, float]] = field(default_factory=dict)
+    by_study_code: dict[str, dict[str, float]] = field(default_factory=dict)
 
-    def read(self, study_id: int) -> dict[str, float]:
-        return self.by_study.get(study_id, {})
+    def read(self, study_code: str) -> dict[str, float]:
+        return self.by_study_code.get(study_code, {})
 
 
 @dataclass
 class _ParamsStub:
-    static: dict[int, dict[str, Any]] = field(default_factory=dict)
-    trajectory: dict[int, dict[str, list[tuple[dict[str, int], Any]]]] = field(default_factory=dict)
+    static: dict[str, dict[str, Any]] = field(default_factory=dict)
+    trajectory: dict[str, dict[str, list[tuple[dict[str, int], Any]]]] = field(default_factory=dict)
 
-    def read_static(self, exp_id: int) -> dict[str, Any]:
-        return self.static.get(exp_id, {})
+    def read_static(self, exp_code: str) -> dict[str, Any]:
+        return self.static.get(exp_code, {})
 
-    def read_trajectory(self, exp_id: int) -> dict[str, list[tuple[dict[str, int], Any]]]:
-        return self.trajectory.get(exp_id, {})
+    def read_trajectory(self, exp_code: str) -> dict[str, list[tuple[dict[str, int], Any]]]:
+        return self.trajectory.get(exp_code, {})
 
 
 @dataclass
@@ -59,10 +60,12 @@ class _FakeClient:
 
 
 def _seed_basic(client: _FakeClient) -> None:
-    client.experiments.by_code["exp1"] = _FakeExp(id=1, code="exp1", study_id=42)
-    client.study_constants.by_study[42] = {"design_height_mm": 30.0}
-    client.params.static[1] = {"path_offset": 1.5, "layer_height": 3.0}
-    client.params.trajectory[1] = {
+    client.experiments.by_code["exp1"] = _FakeExp(
+        id=1, code="exp1", study_id=42, study_code="study_42",
+    )
+    client.study_constants.by_study_code["study_42"] = {"design_height_mm": 30.0}
+    client.params.static["exp1"] = {"path_offset": 1.5, "layer_height": 3.0}
+    client.params.trajectory["exp1"] = {
         "print_speed": [
             ({"layer_idx": 0}, 0.005),
             ({"layer_idx": 3}, 0.006),
@@ -119,8 +122,10 @@ def test_load_for_fabrication_with_schedule_dim_populates_sparse_trajectories():
 def test_sparse_trajectories_empty_when_no_trajectory_params():
     """A study with only static params should yield an empty sparse dict, not error."""
     client = _FakeClient()
-    client.experiments.by_code["exp1"] = _FakeExp(id=1, code="exp1", study_id=42)
-    client.params.static[1] = {"path_offset": 1.5}
+    client.experiments.by_code["exp1"] = _FakeExp(
+        id=1, code="exp1", study_id=42, study_code="study_42",
+    )
+    client.params.static["exp1"] = {"path_offset": 1.5}
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
     load = workflows.load_for_fabrication(
         exp_code="exp1",
@@ -133,8 +138,10 @@ def test_sparse_trajectories_empty_when_no_trajectory_params():
 def test_load_for_fabrication_propagates_validation_errors():
     """A trajectory entry missing the schedule dimension surfaces ValidationError."""
     client = _FakeClient()
-    client.experiments.by_code["exp1"] = _FakeExp(id=1, code="exp1", study_id=42)
-    client.params.trajectory[1] = {"speed": [({"node_idx": 0}, 0.005)]}
+    client.experiments.by_code["exp1"] = _FakeExp(
+        id=1, code="exp1", study_id=42, study_code="study_42",
+    )
+    client.params.trajectory["exp1"] = {"speed": [({"node_idx": 0}, 0.005)]}
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
     with pytest.raises(ValidationError, match="missing dimension"):
         workflows.load_for_fabrication(
@@ -148,7 +155,7 @@ def test_load_for_fabrication_propagates_validation_errors():
 def test_as_overrides_merges_constants_static_and_sparse():
     client = _FakeClient()
     _seed_basic(client)  # static + trajectory
-    client.study_constants.by_study[42] = {"component_height": 25, "water_ratio": 0.25}
+    client.study_constants.by_study_code["study_42"] = {"component_height": 25, "water_ratio": 0.25}
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
     load = workflows.load_for_fabrication(
         exp_code="exp1", mark_running=False, schedule_dim="layer_idx",
@@ -167,10 +174,12 @@ def test_as_overrides_merges_constants_static_and_sparse():
 def test_as_overrides_precedence_trajectory_over_static_over_constants():
     """Same key in multiple buckets: trajectory > static > constants."""
     client = _FakeClient()
-    client.experiments.by_code["exp1"] = _FakeExp(id=1, code="exp1", study_id=42)
-    client.study_constants.by_study[42] = {"shared": "from_constants"}
-    client.params.static[1] = {"shared": "from_static"}
-    client.params.trajectory[1] = {
+    client.experiments.by_code["exp1"] = _FakeExp(
+        id=1, code="exp1", study_id=42, study_code="study_42",
+    )
+    client.study_constants.by_study_code["study_42"] = {"shared": "from_constants"}
+    client.params.static["exp1"] = {"shared": "from_static"}
+    client.params.trajectory["exp1"] = {
         "shared": [({"layer_idx": 0}, "from_trajectory")],
     }
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
@@ -185,7 +194,7 @@ def test_as_overrides_precedence_trajectory_over_static_over_constants():
 def test_as_overrides_with_no_sparse_returns_constants_plus_static_only():
     client = _FakeClient()
     _seed_basic(client)
-    client.study_constants.by_study[42] = {"component_height": 25}
+    client.study_constants.by_study_code["study_42"] = {"component_height": 25}
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
     # No schedule_dim → sparse_trajectories empty
     load = workflows.load_for_fabrication(exp_code="exp1", mark_running=False)

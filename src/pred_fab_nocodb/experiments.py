@@ -17,8 +17,10 @@ class Experiment:
     id: int
     code: str
     study_id: int
+    study_code: str
     status: Status
     dataset_id: Optional[int] = None
+    dataset_code: Optional[str] = None
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     notes: Optional[str] = None
@@ -40,22 +42,22 @@ class ExperimentsClient(_BaseTableClient):
 
     def list_by_study(
         self,
-        study_id: int,
+        study_code: str,
         *,
         status: Status | None = None,
     ) -> list[Experiment]:
         """Return every experiment belonging to a study, optionally filtered by status."""
-        clauses = [f"({ExperimentColumns.STUDIES},eq,{study_id})"]
+        clauses = [f"({ExperimentColumns.STUDIES},eq,{study_code})"]
         if status is not None:
             clauses.append(f"({ExperimentColumns.STATUS},eq,{status.value})")
         rows = self._http.records_list(self._table_id, where="~and".join(clauses))
         return [_row_to_experiment(r) for r in rows]
 
-    def list_by_dataset(self, dataset_id: int) -> list[Experiment]:
+    def list_by_dataset(self, dataset_code: str) -> list[Experiment]:
         """Return every experiment belonging to a dataset."""
         rows = self._http.records_list(
             self._table_id,
-            where=f"({ExperimentColumns.DATASET},eq,{dataset_id})",
+            where=f"({ExperimentColumns.DATASET},eq,{dataset_code})",
         )
         return [_row_to_experiment(r) for r in rows]
 
@@ -133,13 +135,17 @@ class ExperimentsClient(_BaseTableClient):
 
 def _row_to_experiment(row: dict[str, Any]) -> Experiment:
     study_id = _resolve_link_id(row.get(ExperimentColumns.STUDIES))
+    study_code = _resolve_link_code(row.get(ExperimentColumns.STUDIES))
     dataset_id = _resolve_link_id(row.get(ExperimentColumns.DATASET))
+    dataset_code = _resolve_link_code(row.get(ExperimentColumns.DATASET))
     return Experiment(
         id=int(row[ExperimentColumns.ID]),
         code=str(row[ExperimentColumns.CODE]),
         study_id=study_id or 0,
+        study_code=study_code or "",
         status=Status(row.get(ExperimentColumns.STATUS, Status.DRAFT.value)),
         dataset_id=dataset_id,
+        dataset_code=dataset_code,
         started_at=_parse_dt(row.get(ExperimentColumns.STARTED_AT)),
         ended_at=_parse_dt(row.get(ExperimentColumns.ENDED_AT)),
         notes=row.get(ExperimentColumns.NOTES),
@@ -164,6 +170,26 @@ def _resolve_link_id(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _resolve_link_code(value: Any) -> Optional[str]:
+    """Counterpart to `_resolve_link_id` — extracts the linked record's `code`
+    (the LTAR display value) so callers can filter by it. NocoDB v2 LTAR
+    filters compare against the display value, not the id."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, list):
+        if not value:
+            return None
+        first = value[0]
+        if isinstance(first, dict):
+            code = first.get("code")
+            return str(code) if code else None
+        return None
+    if isinstance(value, dict):
+        code = value.get("code")
+        return str(code) if code else None
+    return None
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:

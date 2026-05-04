@@ -174,13 +174,39 @@ def test_read_static_filters_to_null_dim(fake_http):
     fake_http.set_records(
         "set_exp_params",
         [
-            {ParamColumns.CODE: "exp_001/path_offset", ParamColumns.EXPERIMENT: 1,
+            {ParamColumns.CODE: "exp_001/path_offset",
+             ParamColumns.EXPERIMENT: {"Id": 1, "code": "exp_001"},
              "param": "path_offset", ParamColumns.VALUE: "2.5",
              ParamColumns.DIM: None},
-            {ParamColumns.CODE: "exp_001/print_speed/d.d1.0", ParamColumns.EXPERIMENT: 1,
+            {ParamColumns.CODE: "exp_001/print_speed/d.d1.0",
+             ParamColumns.EXPERIMENT: {"Id": 1, "code": "exp_001"},
              "param": "print_speed", ParamColumns.VALUE: "0.005",
-             ParamColumns.DIM: 1},
+             ParamColumns.DIM: {"Id": 1, "code": "d.d1.0"}},
+            {ParamColumns.CODE: "exp_002/path_offset",
+             ParamColumns.EXPERIMENT: {"Id": 2, "code": "exp_002"},
+             "param": "path_offset", ParamColumns.VALUE: "9.9",
+             ParamColumns.DIM: None},
         ],
     )
-    static = params.read_static(1)
+    static = params.read_static("exp_001")
     assert static == {"path_offset": "2.5"}
+
+
+def test_read_methods_filter_by_ltar_code_not_id(fake_http):
+    """Regression: NocoDB v2 LTAR filters compare against the linked record's
+    primary value (code), not the id. Confirm reads use the code path."""
+    _dim, params = _make_clients(fake_http)
+    fake_http.set_records(
+        "set_exp_params",
+        [
+            {ParamColumns.CODE: "ADVEI_2026/reference/000/pathOffset",
+             ParamColumns.EXPERIMENT: {"Id": 71, "code": "ADVEI_2026/reference/000"},
+             "param": "pathOffset", ParamColumns.VALUE: "1.5",
+             ParamColumns.DIM: None},
+        ],
+    )
+    # Filtering by code returns the row.
+    assert params.read_static("ADVEI_2026/reference/000") == {"pathOffset": "1.5"}
+    # Filtering by stringified id does NOT — would silently return empty if
+    # someone reverts the fix.
+    assert params.read_static("71") == {}

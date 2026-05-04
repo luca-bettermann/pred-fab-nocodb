@@ -17,11 +17,15 @@ class StudyConstantsClient(_BaseTableClient):
     holding the constant's identifying code is `param`.
     """
 
-    def read(self, study_id: int) -> dict[str, float]:
-        """Return all constants for a study as `{param_code: value}`."""
+    def read(self, study_code: str) -> dict[str, float]:
+        """Return all constants for a study as `{param_code: value}`.
+
+        Filters by ``study_code`` (the LTAR display value) — NocoDB v2 LTAR
+        filters compare against the linked record's primary value, not the id.
+        """
         rows = self._http.records_list(
             self._table_id,
-            where=f"({StudyConstantColumns.STUDY},eq,{study_id})",
+            where=f"({StudyConstantColumns.STUDY},eq,{study_code})",
         )
         return {
             str(r[StudyConstantColumns.PARAM]): float(r[StudyConstantColumns.VALUE])
@@ -29,12 +33,12 @@ class StudyConstantsClient(_BaseTableClient):
             if StudyConstantColumns.PARAM in r and StudyConstantColumns.VALUE in r
         }
 
-    def get(self, *, study_id: int, param_code: str) -> Optional[float]:
+    def get(self, *, study_code: str, param_code: str) -> Optional[float]:
         """Get a single constant value, or `None` if absent."""
         rows = self._http.records_list(
             self._table_id,
             where=(
-                f"({StudyConstantColumns.STUDY},eq,{study_id})"
+                f"({StudyConstantColumns.STUDY},eq,{study_code})"
                 f"~and({StudyConstantColumns.PARAM},eq,{param_code})"
             ),
             limit=1,
@@ -53,10 +57,11 @@ class StudyConstantsClient(_BaseTableClient):
     ) -> None:
         """Create or update a constant value.
 
-        `study_code` is required for code generation; `study_id` is the FK target.
+        ``study_code`` keys the lookup (LTAR display value); ``study_id`` is
+        used by the /links/ endpoint when wiring up a freshly-created row.
         """
         code = make_study_constant_code(study_code, param_code)
-        existing = self._find_id(study_id=study_id, param_code=param_code)
+        existing = self._find_id(study_code=study_code, param_code=param_code)
         body: dict[str, Any] = {
             StudyConstantColumns.CODE: code,
             StudyConstantColumns.PARAM: param_code,
@@ -65,7 +70,7 @@ class StudyConstantsClient(_BaseTableClient):
         if existing is None:
             self._http.records_create(self._table_id, body)
             # Look up the new row by its just-written `code` (the study link
-            # isn't set yet, so we can't filter by study_id).
+            # isn't set yet, so we can't filter by study).
             constant_id = self._find_id_by_code(code)
             if constant_id is not None:
                 self._link(StudyConstantColumns.STUDY, constant_id, study_id)
@@ -97,20 +102,20 @@ class StudyConstantsClient(_BaseTableClient):
                 value=value,
             )
 
-    def delete(self, *, study_id: int, param_code: str) -> None:
+    def delete(self, *, study_code: str, param_code: str) -> None:
         """Remove a constant. Raises `NotFoundError` if it doesn't exist."""
-        existing = self._find_id(study_id=study_id, param_code=param_code)
+        existing = self._find_id(study_code=study_code, param_code=param_code)
         if existing is None:
             raise NotFoundError(
-                f"Constant {param_code!r} not found in study_id={study_id}"
+                f"Constant {param_code!r} not found in study_code={study_code!r}"
             )
         self._http.records_delete(self._table_id, {StudyConstantColumns.ID: existing})
 
-    def _find_id(self, *, study_id: int, param_code: str) -> Optional[int]:
+    def _find_id(self, *, study_code: str, param_code: str) -> Optional[int]:
         rows = self._http.records_list(
             self._table_id,
             where=(
-                f"({StudyConstantColumns.STUDY},eq,{study_id})"
+                f"({StudyConstantColumns.STUDY},eq,{study_code})"
                 f"~and({StudyConstantColumns.PARAM},eq,{param_code})"
             ),
             limit=1,

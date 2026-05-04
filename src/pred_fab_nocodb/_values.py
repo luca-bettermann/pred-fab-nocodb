@@ -193,17 +193,21 @@ class ValueClient(_BaseTableClient):
     def read(
         self,
         *,
-        exp_id: int,
+        exp_code: str,
         value_code: Optional[str] = None,
     ) -> list[ValueRow]:
-        """Read every row for an experiment, optionally filtered by FK code."""
-        clauses = [f"({ParamColumns.EXPERIMENT},eq,{exp_id})"]
+        """Read every row for an experiment, optionally filtered by FK code.
+
+        Filters by ``exp_code`` (the LTAR display value) — NocoDB v2 compares
+        LTAR fields against the linked record's primary value, not the id.
+        """
+        clauses = [f"({ParamColumns.EXPERIMENT},eq,{exp_code})"]
         if value_code is not None:
             clauses.append(f"({self._fk_col},eq,{value_code})")
         rows = self._http.records_list(self._table_id, where="~and".join(clauses))
         return [self._row_to_value(r) for r in rows]
 
-    def read_static(self, exp_id: int) -> dict[str, Any]:
+    def read_static(self, exp_code: str) -> dict[str, Any]:
         """Every value where `dim IS NULL`, returned as `{value_code: value}`.
 
         Useful for `set_exp_params` to retrieve per-experiment static values
@@ -212,7 +216,7 @@ class ValueClient(_BaseTableClient):
         rows = self._http.records_list(
             self._table_id,
             where=(
-                f"({ParamColumns.EXPERIMENT},eq,{exp_id})"
+                f"({ParamColumns.EXPERIMENT},eq,{exp_code})"
                 f"~and({ParamColumns.DIM},is,null)"
             ),
         )
@@ -220,7 +224,7 @@ class ValueClient(_BaseTableClient):
 
     def read_trajectory(
         self,
-        exp_id: int,
+        exp_code: str,
     ) -> dict[str, list[tuple[dict[str, int], Any]]]:
         """Every value where `dim IS NOT NULL`, grouped by code.
 
@@ -230,7 +234,7 @@ class ValueClient(_BaseTableClient):
         rows = self._http.records_list(
             self._table_id,
             where=(
-                f"({ParamColumns.EXPERIMENT},eq,{exp_id})"
+                f"({ParamColumns.EXPERIMENT},eq,{exp_code})"
                 f"~and({ParamColumns.DIM},isnot,null)"
             ),
         )

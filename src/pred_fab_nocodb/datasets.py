@@ -47,11 +47,11 @@ class DatasetsClient(_BaseTableClient):
             raise NotFoundError(f"Dataset with code={code!r} not found")
         return _row_to_dataset(rows[0])
 
-    def list_by_study(self, study_id: int) -> list[Dataset]:
+    def list_by_study(self, study_code: str) -> list[Dataset]:
         """List every dataset belonging to a study."""
         rows = self._http.records_list(
             self._table_id,
-            where=f"({DatasetColumns.STUDY},eq,{study_id})",
+            where=f"({DatasetColumns.STUDY},eq,{study_code})",
         )
         return [_row_to_dataset(r) for r in rows]
 

@@ -168,22 +168,37 @@ class FakeNocoDBHttp:
         """Record link calls; expose them via `.link_calls` for assertions.
 
         Also mirror NocoDB's effect: after a link write, subsequent reads of
-        the row see the linked id in the corresponding column. Tests can
-        register the column-name mapping for a link field via `set_link_field`.
+        the row see the linked record's ``{Id, code}`` dict in the
+        corresponding column (NocoDB v2 returns LTAR as a dict, not a bare
+        id). Tests register the column-name mapping for a link field via
+        ``set_link_field``.
         """
         self.calls.append(("link_records", table_id, {"field": link_field_id, "record": record_id}, linked_record_ids))
         ids = [linked_record_ids] if isinstance(linked_record_ids, int) else list(linked_record_ids)
         self._links.setdefault((table_id, link_field_id, record_id), []).extend(ids)
-        # Reflect the link onto the row itself: write linked_record_ids into the
-        # column whose name was registered for this link field id (if any).
+        # Reflect the link onto the row itself: write a {Id, code} dict (the
+        # NocoDB v2 LTAR shape) so reads + filters work correctly.
         column_name = self._link_field_to_column.get((table_id, link_field_id))
         if column_name is not None:
+            shaped: list[dict[str, Any]] = [self._shape_link(i) for i in ids]
             for row in self._tables.get(table_id, []):
                 if int(row.get("Id", -1)) == record_id:
                     row[column_name] = (
-                        ids[0] if isinstance(linked_record_ids, int) else list(ids)
+                        shaped[0] if isinstance(linked_record_ids, int) else shaped
                     )
                     break
+
+    def _shape_link(self, linked_id: int) -> dict[str, Any]:
+        """Produce the `{Id, code}` LTAR shape by scanning all tables for a
+        row with this Id. Falls back to `{Id}` only if no match found."""
+        for rows in self._tables.values():
+            for row in rows:
+                if int(row.get("Id", -1)) == linked_id:
+                    code = row.get("code")
+                    if code is not None:
+                        return {"Id": linked_id, "code": str(code)}
+                    return {"Id": linked_id}
+        return {"Id": linked_id}
 
     def set_link_field(self, table_id: str, link_field_id: str, column_name: str) -> None:
         """Register the column name a given link field updates on its row.
@@ -213,6 +228,11 @@ def _matches_where(row: dict[str, Any], where: Optional[str]) -> bool:
 
     Supports `eq`, `is`, `isnot` operators and `~and` conjunction. Used only
     in the fake HTTP fixture to exercise client logic.
+
+    For LTAR fields stored as ``{"Id": ..., "code": ...}`` (or a list of
+    such dicts), `eq` matches against either the linked record's ``code``
+    (NocoDB v2's actual LTAR filter behaviour — what production exercises)
+    or its ``Id`` (legacy fixture shape; kept so older tests still pass).
     """
     if not where:
         return True
@@ -228,18 +248,49 @@ def _matches_where(row: dict[str, Any], where: Optional[str]) -> bool:
         field, op, value = bits
         cell = row.get(field)
         if op == "eq":
-            if str(cell) != value and not (isinstance(cell, (int, float)) and str(cell) == value):
-                if not (isinstance(cell, list) and cell and str(_link_id(cell[0])) == value):
-                    return False
+            if not _eq_matches(cell, value):
+                return False
         elif op == "is" and value == "null":
-            if cell is not None and cell != "":
+            if not _is_null(cell):
                 return False
         elif op == "isnot" and value == "null":
-            if cell is None or cell == "":
+            if _is_null(cell):
                 return False
         else:
             return False
     return True
+
+
+def _eq_matches(cell: Any, value: str) -> bool:
+    if str(cell) == value:
+        return True
+    if isinstance(cell, (int, float)) and str(cell) == value:
+        return True
+    if isinstance(cell, dict):
+        return _link_matches(cell, value)
+    if isinstance(cell, list) and cell:
+        return any(_link_matches(item, value) for item in cell if isinstance(item, dict))
+    return False
+
+
+def _link_matches(item: dict[str, Any], value: str) -> bool:
+    """LTAR field matches by linked record's `code` (display value).
+
+    Mirrors NocoDB v2 behaviour: LTAR filters compare against the linked
+    record's primary value, NOT its id. Tests must seed LTAR cells as
+    ``{"Id": ..., "code": ...}`` and pass codes (not ids) to read methods —
+    otherwise the test won't catch a real production regression.
+    """
+    code = item.get("code")
+    return code is not None and str(code) == value
+
+
+def _is_null(cell: Any) -> bool:
+    if cell is None or cell == "":
+        return True
+    if isinstance(cell, list) and not cell:
+        return True
+    return False
 
 
 def _link_id(item: Any) -> Any:

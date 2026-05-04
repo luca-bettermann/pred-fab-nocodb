@@ -165,9 +165,9 @@ class WorkflowsClient:
         ``trajectory_params`` is populated.
         """
         exp = self._c.experiments.get_by_code(exp_code)
-        constants = self._c.study_constants.read(exp.study_id)
-        static = self._c.params.read_static(exp.id)
-        trajectory = self._c.params.read_trajectory(exp.id)
+        constants = self._c.study_constants.read(exp.study_code)
+        static = self._c.params.read_static(exp.code)
+        trajectory = self._c.params.read_trajectory(exp.code)
         if mark_running:
             self._c.experiments.update_status(exp.id, Status.RUNNING)
             self._c.experiments.update_timestamps(exp.id, started_at=datetime.utcnow())
@@ -233,7 +233,7 @@ class WorkflowsClient:
         for training-data construction where in-progress runs would be noise).
         """
         dataset = self._c.datasets.get_by_code(dataset_code)
-        experiments = self._c.experiments.list_by_dataset(dataset.id)
+        experiments = self._c.experiments.list_by_dataset(dataset.code)
         if only_done:
             experiments = [e for e in experiments if e.status == Status.DONE]
         bundles: list[ExperimentBundle] = []
@@ -243,10 +243,10 @@ class WorkflowsClient:
                     experiment_id=exp.id,
                     experiment_code=exp.code,
                     status=exp.status,
-                    static_params=self._c.params.read_static(exp.id),
-                    trajectory_params=self._c.params.read_trajectory(exp.id),
-                    features=self._c.features.read_trajectory(exp.id),
-                    attributes=self._c.attributes.read_trajectory(exp.id),
+                    static_params=self._c.params.read_static(exp.code),
+                    trajectory_params=self._c.params.read_trajectory(exp.code),
+                    features=self._c.features.read_trajectory(exp.code),
+                    attributes=self._c.attributes.read_trajectory(exp.code),
                 )
             )
         return bundles
@@ -276,19 +276,19 @@ class WorkflowsClient:
         except NotFoundError:
             return counts
 
-        experiments = self._c.experiments.list_by_dataset(dataset.id)
+        experiments = self._c.experiments.list_by_dataset(dataset.code)
 
         # Cascade: per-experiment value rows first, then the experiments,
         # then the dataset row itself.
         for exp in experiments:
             counts["params"] += self._delete_values_for_exp(
-                self._c.params._table_id, exp.id, ParamColumns.EXPERIMENT,
+                self._c.params._table_id, exp.code, ParamColumns.EXPERIMENT,
             )
             counts["features"] += self._delete_values_for_exp(
-                self._c.features._table_id, exp.id, FeatureColumns.EXPERIMENT,
+                self._c.features._table_id, exp.code, FeatureColumns.EXPERIMENT,
             )
             counts["attributes"] += self._delete_values_for_exp(
-                self._c.attributes._table_id, exp.id, AttributeColumns.EXPERIMENT,
+                self._c.attributes._table_id, exp.code, AttributeColumns.EXPERIMENT,
             )
 
         if experiments:
@@ -308,13 +308,13 @@ class WorkflowsClient:
     def _delete_values_for_exp(
         self,
         table_id: str,
-        exp_id: int,
+        exp_code: str,
         experiment_column: str,
     ) -> int:
-        """Bulk-delete every set_exp_* row whose experiment FK == exp_id."""
+        """Bulk-delete every set_exp_* row whose experiment LTAR == exp_code."""
         rows = self._c._http.records_list(
             table_id,
-            where=f"({experiment_column},eq,{exp_id})",
+            where=f"({experiment_column},eq,{exp_code})",
         )
         if not rows:
             return 0

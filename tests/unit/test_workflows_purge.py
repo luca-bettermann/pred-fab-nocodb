@@ -47,11 +47,11 @@ class _StubDatasets:
 
 @dataclass
 class _StubExperiments:
-    by_dataset: dict[int, list[_FakeExperiment]] = field(default_factory=dict)
+    by_dataset_code: dict[str, list[_FakeExperiment]] = field(default_factory=dict)
     table_id: str = "experiments"
 
-    def list_by_dataset(self, dataset_id: int) -> list[_FakeExperiment]:
-        return list(self.by_dataset.get(dataset_id, []))
+    def list_by_dataset(self, dataset_code: str) -> list[_FakeExperiment]:
+        return list(self.by_dataset_code.get(dataset_code, []))
 
     @property
     def _table_id(self) -> str:
@@ -72,13 +72,13 @@ class _StubValuesByExp:
 class _StubHttp:
     """Captures records_list / records_delete calls; serves seeded value rows."""
 
-    rows_by_table_and_exp: dict[tuple[str, int], list[dict[str, Any]]] = field(default_factory=dict)
+    rows_by_table_and_exp: dict[tuple[str, str], list[dict[str, Any]]] = field(default_factory=dict)
     deletes: list[tuple[str, list[int]]] = field(default_factory=list)
 
     def records_list(self, table_id: str, *, where: str = "", **kwargs: Any) -> list[dict[str, Any]]:
-        # Parse `(experiment,eq,N)` from where clause to match behaviour of real http
-        for (tid, exp_id), rows in self.rows_by_table_and_exp.items():
-            if tid == table_id and where == f"(experiment,eq,{exp_id})":
+        # Parse `(experiment,eq,CODE)` from where clause to match behaviour of real http
+        for (tid, exp_code), rows in self.rows_by_table_and_exp.items():
+            if tid == table_id and where == f"(experiment,eq,{exp_code})":
                 return rows
         return []
 
@@ -117,16 +117,16 @@ def test_purge_absent_dataset_is_noop():
 def test_purge_dataset_with_experiments_and_values():
     client = _FakeClient()
     client.datasets.by_code["DS/ref"] = _FakeDataset(id=10, code="DS/ref")
-    client.experiments.by_dataset[10] = [
+    client.experiments.by_dataset_code["DS/ref"] = [
         _FakeExperiment(id=100, code="DS/ref/000"),
         _FakeExperiment(id=101, code="DS/ref/001"),
     ]
     # Per-experiment param rows
     client._http.rows_by_table_and_exp = {
-        ("set_exp_params", 100): [{"Id": 1000}, {"Id": 1001}, {"Id": 1002}],
-        ("set_exp_params", 101): [{"Id": 1010}, {"Id": 1011}],
-        ("set_exp_features", 100): [{"Id": 2000}],
-        ("set_exp_attributes", 101): [{"Id": 3000}, {"Id": 3001}],
+        ("set_exp_params", "DS/ref/000"): [{"Id": 1000}, {"Id": 1001}, {"Id": 1002}],
+        ("set_exp_params", "DS/ref/001"): [{"Id": 1010}, {"Id": 1011}],
+        ("set_exp_features", "DS/ref/000"): [{"Id": 2000}],
+        ("set_exp_attributes", "DS/ref/001"): [{"Id": 3000}, {"Id": 3001}],
     }
 
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
@@ -142,9 +142,9 @@ def test_purge_dataset_deletes_in_correct_order():
     """Values must be removed before experiments, experiments before the dataset."""
     client = _FakeClient()
     client.datasets.by_code["DS/x"] = _FakeDataset(id=20, code="DS/x")
-    client.experiments.by_dataset[20] = [_FakeExperiment(id=200, code="DS/x/000")]
+    client.experiments.by_dataset_code["DS/x"] = [_FakeExperiment(id=200, code="DS/x/000")]
     client._http.rows_by_table_and_exp = {
-        ("set_exp_params", 200): [{"Id": 5000}],
+        ("set_exp_params", "DS/x/000"): [{"Id": 5000}],
     }
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
     workflows.purge_dataset("DS/x")
@@ -159,7 +159,7 @@ def test_purge_empty_dataset_still_deletes_dataset_row():
     """Dataset with no experiments still gets removed itself."""
     client = _FakeClient()
     client.datasets.by_code["DS/empty"] = _FakeDataset(id=30, code="DS/empty")
-    client.experiments.by_dataset[30] = []
+    client.experiments.by_dataset_code["DS/empty"] = []
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]
     counts = workflows.purge_dataset("DS/empty")
     assert counts["datasets"] == 1
