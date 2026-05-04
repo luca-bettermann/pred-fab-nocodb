@@ -10,10 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
-from pred_fab.core.events import ParameterUpdateEvent
-
 from ._base import _BaseTableClient
 from ._codes import make_value_code
+from .events import ParameterUpdateEvent
 from .errors import ValidationError
 from .schema import ParamColumns
 

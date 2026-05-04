@@ -32,8 +32,8 @@ from pred_fab_nocodb.schema import (
 )
 from pred_fab_nocodb.studies import StudiesClient
 from pred_fab_nocodb.study_constants import StudyConstantsClient
-from pred_fab_nocodb import ParameterUpdateEvent
 from pred_fab_nocodb._values import ValueClient, ValueWriteItem
+from pred_fab_nocodb.events import ParameterUpdateEvent
 from pred_fab_nocodb.workflows import (
     ExperimentPlan,
     WorkflowsClient,

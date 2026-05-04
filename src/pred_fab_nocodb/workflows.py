@@ -18,10 +18,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
-from pred_fab.core.events import ParameterUpdateEvent
-
 from ._values import ValueWriteItem
 from .errors import NotFoundError
+from .events import ParameterUpdateEvent
 from .schema import (
     AttributeColumns,
     DatasetColumns,

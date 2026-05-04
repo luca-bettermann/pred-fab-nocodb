@@ -2,8 +2,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from pred_fab.core.events import ParameterUpdateEvent
-
+from pred_fab_nocodb.events import ParameterUpdateEvent
 from pred_fab_nocodb.workflows import WorkflowsClient
 
 
