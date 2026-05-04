@@ -7,7 +7,7 @@ from ._http import _NocoDBHttp
 from ._values import ValueClient
 from .datasets import DatasetsClient
 from .dim_positions import DimPositionsClient
-from .errors import NocoDBError
+from .errors import NocoDBError, ValidationError
 from .experiments import ExperimentsClient
 from .schema import (
     AttributeColumns,
@@ -58,7 +58,21 @@ class NocoDBClient:
         If both `study_code` and `expected_schema` are supplied, the client
         pulls `studies.schema_json` for that study at init and validates it
         against `expected_schema`. Raises `SchemaMismatchError` on divergence.
+
+        Raises `ValidationError` if any of `base_url`, `api_token`, or
+        `base_id` is empty / whitespace.
         """
+        missing = [
+            name for name, val in [
+                ("base_url", base_url),
+                ("api_token", api_token),
+                ("base_id", base_id),
+            ] if not (val or "").strip()
+        ]
+        if missing:
+            raise ValidationError(
+                f"NocoDBClient: missing required argument(s): {', '.join(missing)}"
+            )
         self._http = _NocoDBHttp(
             base_url=base_url,
             api_token=api_token,
