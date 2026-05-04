@@ -1,7 +1,7 @@
 """set_study_constants table client."""
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from ._base import _BaseTableClient
 from ._codes import make_study_constant_code
@@ -73,6 +73,29 @@ class StudyConstantsClient(_BaseTableClient):
             body[StudyConstantColumns.ID] = existing
             self._http.records_update(self._table_id, body)
             # Existing row already has its study link set; nothing to do.
+
+    def write_batch(
+        self,
+        *,
+        study_id: int,
+        study_code: str,
+        constants: Mapping[str, float],
+    ) -> None:
+        """Upsert multiple constants for one study in one call.
+
+        Iterates ``write`` per key — typical study has <20 constants, so
+        per-row HTTP calls are fine. Each entry is upsert: existing rows
+        get their value patched, missing rows are created with the study
+        link set via the /links/ endpoint. Keys absent from ``constants``
+        but present in NocoDB are left untouched (no deletion).
+        """
+        for param_code, value in constants.items():
+            self.write(
+                study_id=study_id,
+                study_code=study_code,
+                param_code=param_code,
+                value=value,
+            )
 
     def delete(self, *, study_id: int, param_code: str) -> None:
         """Remove a constant. Raises `NotFoundError` if it doesn't exist."""

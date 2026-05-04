@@ -97,6 +97,7 @@ Same shape — `ValueClient` parameterised per table.
 | `save_fabrication_result(*, exp_code, status=DONE, features=None, attributes=None, ended_at=None, notes=None)` | Bulk-write features + attributes, transition status |
 | `load_dataset(*, dataset_code, only_done=False)` | Bundle all experiments in a dataset for training |
 | `purge_dataset(dataset_code)` | Delete a dataset, its experiments, and every per-experiment value row. Idempotent; intended for re-plan flows that need a clean slate. Returns per-table delete counts. |
+| `push_study_definition(*, study_code, schema, constants=None)` | One call that owns "everything that defines a study": writes `studies.schema` JSON and (optional) upserts every `{param_code: value}` pair in `set_study_constants`. Idempotent. Constants in NocoDB but absent from the dict are left alone. |
 
 ---
 
