@@ -63,10 +63,17 @@ class ValueClient(_BaseTableClient):
         fk_code_column: str,
         dim_client: "DimPositionsClient",
         link_field_ids: dict[str, str] | None = None,
+        reverse_link_ids: dict[str, tuple[str, str]] | None = None,
     ):
         super().__init__(http, base_id, table_id, link_field_ids=link_field_ids)
         self._fk_col = fk_code_column
         self._dim_client = dim_client
+        # `reverse_link_ids[field_name] = (parent_table_id, parent_reverse_field_id)`
+        # — when populated, `write_batch` issues ONE parent-side `/links/`
+        # call per (parent_id, group_of_children) instead of N child-side
+        # calls. Empty in unit-test fixtures that don't seed `colOptions`;
+        # the write path falls back to per-row child-side links.
+        self._reverse_link_ids: dict[str, tuple[str, str]] = reverse_link_ids or {}
 
     # ─── Write ────────────────────────────────────────────────────────
 
@@ -171,15 +178,63 @@ class ValueClient(_BaseTableClient):
             self._http.records_update(self._table_id, update_bodies)
 
         # Re-fetch every row to get the (now-stable) ids, then assert links.
-        results: list[ValueRow] = []
+        # Collect record ids first so we can issue one bulk parent-side
+        # `/links/` call per (parent_id, group_of_children) instead of 2N
+        # child-side calls (one per row × each LTAR). Falls back to per-row
+        # child-side calls when the reverse-link map isn't resolved (unit
+        # tests that don't seed `colOptions`).
+        record_ids: list[int] = []
+        record_ids_by_dim: dict[int, list[int]] = {}
         for row_code, dim_id in zip(row_codes, per_item_dim_ids):
             row = self._lookup_by_code(row_code)
             record_id = int(row[ParamColumns.ID])
-            self._link(ParamColumns.EXPERIMENT, record_id, exp_id)
+            record_ids.append(record_id)
             if dim_id is not None:
-                self._link(ParamColumns.DIM, record_id, dim_id)
-            results.append(self._row_to_value(self._lookup_by_code(row_code)))
-        return results
+                record_ids_by_dim.setdefault(dim_id, []).append(record_id)
+
+        # 1 call linking every child row → exp_id (from the experiment side).
+        if record_ids and not self._link_reverse_batch(
+            ParamColumns.EXPERIMENT, exp_id, record_ids,
+        ):
+            for record_id in record_ids:
+                self._link(ParamColumns.EXPERIMENT, record_id, exp_id)
+
+        # K calls for dim links — one per unique dim_id, batching its child rows.
+        for dim_id, child_ids in record_ids_by_dim.items():
+            if not self._link_reverse_batch(ParamColumns.DIM, dim_id, child_ids):
+                for record_id in child_ids:
+                    self._link(ParamColumns.DIM, record_id, dim_id)
+
+        # Re-fetch each row to capture the now-asserted links in the returned ValueRow.
+        return [self._row_to_value(self._lookup_by_code(row_code)) for row_code in row_codes]
+
+    def _link_reverse_batch(
+        self,
+        field_name: str,
+        parent_record_id: int,
+        child_record_ids: list[int],
+    ) -> bool:
+        """Bulk-link from the parent side: ONE call sets all child links.
+
+        Returns True iff the reverse-link metadata for ``field_name`` was
+        resolved at construction (and the link call was made). Returns
+        False otherwise so the caller can fall back to per-row child-side
+        ``_link`` calls — that's the path unit-test fixtures take when
+        they don't seed ``colOptions.fk_related_model_id``.
+        """
+        pair = self._reverse_link_ids.get(field_name)
+        if pair is None:
+            return False
+        parent_table_id, parent_reverse_field_id = pair
+        if not child_record_ids:
+            return True
+        self._http.link_records(
+            table_id=parent_table_id,
+            link_field_id=parent_reverse_field_id,
+            record_id=parent_record_id,
+            linked_record_ids=list(child_record_ids),
+        )
+        return True
 
     def _try_lookup_by_code(self, row_code: str) -> Optional[dict[str, Any]]:
         """Like `_lookup_by_code` but returns None instead of raising."""

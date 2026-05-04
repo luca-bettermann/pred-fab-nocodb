@@ -82,7 +82,12 @@ def test_write_links_experiment_via_links_endpoint(fake_http):
 
 
 def test_write_batch_links_experiment_and_dim(fake_http):
-    """Each batched row gets its experiment link + dim link (when applicable)."""
+    """Each batched row gets its experiment link + dim link (when applicable).
+
+    Fallback path: when `reverse_link_ids` isn't populated (the test fixture
+    doesn't seed `colOptions`), `write_batch` issues per-row child-side
+    calls — the original 2N behaviour.
+    """
     _dim, params = _make_clients(fake_http)
     items = [
         ValueWriteItem(
@@ -106,6 +111,52 @@ def test_write_batch_links_experiment_and_dim(fake_http):
     # Dim ids are distinct (different layer_idx values)
     dim_target_ids = {c[3] for c in dim_links}
     assert len(dim_target_ids) == 2
+
+
+def test_write_batch_collapses_links_via_reverse_side(fake_http):
+    """When the reverse-link map is resolved (production path), `write_batch`
+    issues ONE bulk parent-side `/links/` call per (parent, group) instead of
+    2N child-side calls. Regression guard for the link-count optimisation."""
+    dim = DimPositionsClient(fake_http, base_id="b1", table_id="dim_positions")
+    fake_http.set_records("dim_positions", [])
+    fake_http.set_records("set_exp_params", [])
+    params = ValueClient(
+        fake_http, base_id="b1", table_id="set_exp_params",
+        fk_code_column="param", dim_client=dim,
+        link_field_ids={"experiment": "fld_exp_link", "dim": "fld_dim_link"},
+        reverse_link_ids={
+            "experiment": ("experiments", "fld_exp_reverse"),
+            "dim": ("dim_positions", "fld_dim_reverse"),
+        },
+    )
+    fake_http.set_link_field("set_exp_params", "fld_exp_link", "experiment")
+    fake_http.set_link_field("set_exp_params", "fld_dim_link", "dim")
+    items = [
+        ValueWriteItem(value_code="V_fab", value="0.005", domain="structural", axes={"layer_idx": 0}),
+        ValueWriteItem(value_code="V_fab", value="0.006", domain="structural", axes={"layer_idx": 1}),
+        ValueWriteItem(value_code="V_fab", value="0.007", domain="structural", axes={"layer_idx": 2}),
+    ]
+    params.write_batch(exp_id=42, exp_code="ADVEI/exp_001", items=items)
+
+    links = [c for c in fake_http.calls if c[0] == "link_records"]
+    # Old behaviour would have been 2N = 6 (one per row × 2 LTAR fields).
+    # New: 1 parent-side call for experiment + 3 parent-side calls for dim
+    # (one per unique dim_id) = 4.
+    assert len(links) == 4
+
+    exp_calls = [c for c in links if c[1] == "experiments"]
+    assert len(exp_calls) == 1
+    assert exp_calls[0][2]["field"] == "fld_exp_reverse"
+    assert exp_calls[0][2]["record"] == 42  # parent record id
+    # The single call carries every child row id at once.
+    assert sorted(exp_calls[0][3]) == sorted([
+        int(r["Id"]) for r in fake_http.get_records("set_exp_params")
+    ])
+
+    dim_calls = [c for c in links if c[1] == "dim_positions"]
+    assert len(dim_calls) == 3  # one per unique dim_id
+    for c in dim_calls:
+        assert c[2]["field"] == "fld_dim_reverse"
 
 
 def test_write_does_not_send_link_fields_in_records_create(fake_http):
