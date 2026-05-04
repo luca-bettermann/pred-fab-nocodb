@@ -226,13 +226,13 @@ class FakeNocoDBHttp:
 def _matches_where(row: dict[str, Any], where: Optional[str]) -> bool:
     """Evaluate a `where` clause of the form `(field,op,value)~and(field,op,value)...`.
 
-    Supports `eq`, `is`, `isnot` operators and `~and` conjunction. Used only
-    in the fake HTTP fixture to exercise client logic.
+    Supports `eq`, `is`, `isnot`, `blank`, `notblank` operators and `~and`
+    conjunction. Used only in the fake HTTP fixture to exercise client logic.
 
-    For LTAR fields stored as ``{"Id": ..., "code": ...}`` (or a list of
-    such dicts), `eq` matches against either the linked record's ``code``
-    (NocoDB v2's actual LTAR filter behaviour — what production exercises)
-    or its ``Id`` (legacy fixture shape; kept so older tests still pass).
+    For LTAR fields stored as ``{"Id": ..., "code": ...}``, `eq` matches
+    against the linked record's ``code`` (NocoDB v2's LTAR filter
+    behaviour); ``blank`` / ``notblank`` are the LTAR-aware null checks
+    NocoDB requires (``is,null`` does not work on LTAR fields).
     """
     if not where:
         return True
@@ -254,6 +254,12 @@ def _matches_where(row: dict[str, Any], where: Optional[str]) -> bool:
             if not _is_null(cell):
                 return False
         elif op == "isnot" and value == "null":
+            if _is_null(cell):
+                return False
+        elif op == "blank":
+            if not _is_null(cell):
+                return False
+        elif op == "notblank":
             if _is_null(cell):
                 return False
         else:

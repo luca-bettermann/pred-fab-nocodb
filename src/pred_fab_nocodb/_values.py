@@ -208,16 +208,19 @@ class ValueClient(_BaseTableClient):
         return [self._row_to_value(r) for r in rows]
 
     def read_static(self, exp_code: str) -> dict[str, Any]:
-        """Every value where `dim IS NULL`, returned as `{value_code: value}`.
+        """Every value where `dim` is unset, returned as `{value_code: value}`.
 
         Useful for `set_exp_params` to retrieve per-experiment static values
         before a fab run.
+
+        Uses NocoDB v2's ``blank`` operator — ``is,null`` does not work on
+        LTAR fields and silently filters every row out.
         """
         rows = self._http.records_list(
             self._table_id,
             where=(
                 f"({ParamColumns.EXPERIMENT},eq,{exp_code})"
-                f"~and({ParamColumns.DIM},is,null)"
+                f"~and({ParamColumns.DIM},blank,)"
             ),
         )
         return {str(r[self._fk_col]): r[ParamColumns.VALUE] for r in rows if self._fk_col in r}
@@ -226,16 +229,19 @@ class ValueClient(_BaseTableClient):
         self,
         exp_code: str,
     ) -> dict[str, list[tuple[dict[str, int], Any]]]:
-        """Every value where `dim IS NOT NULL`, grouped by code.
+        """Every value where `dim` is populated, grouped by code.
 
         Returns `{value_code: [(axes, value), ...]}`. For `set_exp_params`,
         useful for retrieving per-layer trajectories.
+
+        Uses NocoDB v2's ``notblank`` operator (LTAR-aware null check); a
+        client-side ``dim_id is None`` skip remains as belt-and-suspenders.
         """
         rows = self._http.records_list(
             self._table_id,
             where=(
                 f"({ParamColumns.EXPERIMENT},eq,{exp_code})"
-                f"~and({ParamColumns.DIM},isnot,null)"
+                f"~and({ParamColumns.DIM},notblank,)"
             ),
         )
         out: dict[str, list[tuple[dict[str, int], Any]]] = {}
