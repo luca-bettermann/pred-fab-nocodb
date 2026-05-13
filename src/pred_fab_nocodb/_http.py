@@ -59,21 +59,32 @@ class _NocoDBHttp:
         """`GET /api/v2/tables/{tableId}/records/{rowId}`."""
         return self._request("GET", f"/api/v2/tables/{table_id}/records/{record_id}")
 
+    _BATCH_LIMIT = 100
+
     def records_create(self, table_id: str, body: dict[str, Any] | list[dict[str, Any]]) -> Any:
-        """`POST /api/v2/tables/{tableId}/records` — accepts a single row or a list for bulk insert."""
-        return self._request("POST", f"/api/v2/tables/{table_id}/records", json=body)
+        """`POST /api/v2/tables/{tableId}/records` — auto-batches lists > 100."""
+        return self._batched("POST", table_id, body)
 
     def records_update(
         self,
         table_id: str,
         body: dict[str, Any] | list[dict[str, Any]],
     ) -> Any:
-        """`PATCH /api/v2/tables/{tableId}/records` — body must include `Id` (or each row's `Id` for bulk)."""
-        return self._request("PATCH", f"/api/v2/tables/{table_id}/records", json=body)
+        """`PATCH /api/v2/tables/{tableId}/records` — auto-batches lists > 100."""
+        return self._batched("PATCH", table_id, body)
 
     def records_delete(self, table_id: str, body: dict[str, Any] | list[dict[str, Any]]) -> Any:
-        """`DELETE /api/v2/tables/{tableId}/records` — body holds `Id`(s)."""
-        return self._request("DELETE", f"/api/v2/tables/{table_id}/records", json=body)
+        """`DELETE /api/v2/tables/{tableId}/records` — auto-batches lists > 100."""
+        return self._batched("DELETE", table_id, body)
+
+    def _batched(self, method: str, table_id: str, body: dict[str, Any] | list[dict[str, Any]]) -> Any:
+        url = f"/api/v2/tables/{table_id}/records"
+        if not isinstance(body, list) or len(body) <= self._BATCH_LIMIT:
+            return self._request(method, url, json=body)
+        results = []
+        for i in range(0, len(body), self._BATCH_LIMIT):
+            results.append(self._request(method, url, json=body[i:i + self._BATCH_LIMIT]))
+        return results
 
     def records_count(self, table_id: str, *, where: str | None = None) -> int:
         """`GET /api/v2/tables/{tableId}/records/count` — total rows (filtered)."""

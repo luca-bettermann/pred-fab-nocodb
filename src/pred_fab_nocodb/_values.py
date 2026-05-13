@@ -174,7 +174,6 @@ class ValueClient(_BaseTableClient):
         if insert_bodies:
             self._http.records_create(self._table_id, insert_bodies)
         if update_bodies:
-            # records_update accepts a list for bulk PATCH.
             self._http.records_update(self._table_id, update_bodies)
 
         # Re-fetch every row to get the (now-stable) ids, then assert links.
