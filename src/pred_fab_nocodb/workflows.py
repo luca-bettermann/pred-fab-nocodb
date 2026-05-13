@@ -133,7 +133,15 @@ class WorkflowsClient:
         study = self._c.studies.get_by_code(study_code)
         dataset_id: Optional[int] = None
         if dataset_code is not None:
-            dataset_id = self._c.datasets.upsert(study_id=study.id, code=dataset_code).id
+            try:
+                dataset_id = self._c.datasets.get_by_code(dataset_code).id
+            except NotFoundError:
+                # Derive name from dataset_code: "ADVEI_2026/discovery" → "discovery"
+                name = dataset_code.rsplit("/", 1)[-1]
+                dataset_id = self._c.datasets.upsert(
+                    study_id=study.id, study_code=study_code, name=name,
+                    strategy=Strategy.BASELINE, purpose=Purpose.REFERENCE,
+                ).id
 
         exp = self._c.experiments.upsert(
             study_id=study.id,
