@@ -121,6 +121,8 @@ class WorkflowsClient:
         plan: ExperimentPlan,
         dataset_code: Optional[str] = None,
         domain: Optional[str] = None,
+        strategy: Strategy = Strategy.BASELINE,
+        purpose: Purpose = Purpose.TRAIN,
     ) -> int:
         """Create a draft experiment + write all its parameters in one shot.
 
@@ -142,7 +144,7 @@ class WorkflowsClient:
                 name = dataset_code.rsplit("/", 1)[-1]
                 dataset_id = self._c.datasets.upsert(
                     study_id=study.id, study_code=study_code, name=name,
-                    strategy=Strategy.BASELINE, purpose=Purpose.REFERENCE,
+                    strategy=strategy, purpose=purpose,
                 ).id
 
         exp = self._c.experiments.upsert(
