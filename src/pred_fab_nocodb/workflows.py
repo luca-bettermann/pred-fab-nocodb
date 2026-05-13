@@ -27,7 +27,9 @@ from .schema import (
     ExperimentColumns,
     FeatureColumns,
     ParamColumns,
+    Purpose,
     Status,
+    Strategy,
 )
 
 if TYPE_CHECKING:
