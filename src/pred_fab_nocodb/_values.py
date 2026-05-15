@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional
 from ._base import _BaseTableClient
 from ._codes import make_value_code
 from .events import ParameterUpdateEvent
-from .errors import ValidationError
+from .errors import NotFoundError, ValidationError
 from .schema import ParamColumns
 
 if TYPE_CHECKING:
@@ -192,20 +192,39 @@ class ValueClient(_BaseTableClient):
                 record_ids_by_dim.setdefault(dim_id, []).append(record_id)
 
         # 1 call linking every child row → exp_id (from the experiment side).
-        if record_ids and not self._link_reverse_batch(
-            ParamColumns.EXPERIMENT, exp_id, record_ids,
-        ):
-            for record_id in record_ids:
-                self._link(ParamColumns.EXPERIMENT, record_id, exp_id)
+        self._safe_link_batch(ParamColumns.EXPERIMENT, exp_id, record_ids)
 
         # K calls for dim links — one per unique dim_id, batching its child rows.
         for dim_id, child_ids in record_ids_by_dim.items():
-            if not self._link_reverse_batch(ParamColumns.DIM, dim_id, child_ids):
-                for record_id in child_ids:
-                    self._link(ParamColumns.DIM, record_id, dim_id)
+            self._safe_link_batch(ParamColumns.DIM, dim_id, child_ids)
 
         # Re-fetch each row to capture the now-asserted links in the returned ValueRow.
         return [self._row_to_value(self._lookup_by_code(row_code)) for row_code in row_codes]
+
+    def _safe_link_batch(
+        self,
+        field_name: str,
+        parent_id: int,
+        child_record_ids: list[int],
+    ) -> None:
+        """Link children to parent, tolerating stale IDs after DB rebuilds.
+
+        Tries reverse-batch first, falls back to per-row child-side, and
+        swallows NotFoundError on either path — the value rows are already
+        written; links can be re-asserted later.
+        """
+        if not child_record_ids:
+            return
+        try:
+            if self._link_reverse_batch(field_name, parent_id, child_record_ids):
+                return
+        except NotFoundError:
+            pass
+        for record_id in child_record_ids:
+            try:
+                self._link(field_name, record_id, parent_id)
+            except NotFoundError:
+                pass
 
     def _link_reverse_batch(
         self,
