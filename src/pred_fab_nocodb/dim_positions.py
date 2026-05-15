@@ -134,6 +134,11 @@ class DimPositionsClient(_BaseTableClient):
         # complete DimPosition reliably.
         position = self.get_by_code(code)
         self._cache[(domain, canonical)] = position
+
+        # Link to all ancestor dim_positions (strict sub-axes with matching values).
+        if depth > 0:
+            self._link_ancestors(position, domain, axes)
+
         return position
 
     def get_or_create_batch(
@@ -146,6 +151,33 @@ class DimPositionsClient(_BaseTableClient):
         return [self.get_or_create(domain=domain, axes=axes) for axes in axes_list]
 
     # ─── Internal ──────────────────────────────────────────────────────
+
+    def _link_ancestors(
+        self,
+        position: DimPosition,
+        domain: str,
+        axes: Mapping[str, int],
+    ) -> None:
+        """Link a dim_position to all ancestors via the contained_in self-link.
+
+        Ancestors are all dims in the same domain whose axes are a strict
+        subset of this dim's axes with matching values. E.g. for axes
+        ``{"layers": 3, "nodes": 5}``, the ancestor is the dim with
+        axes ``{"layers": 3}``.
+        """
+        keys = list(axes.keys())
+        for length in range(1, len(keys)):
+            sub_axes = {keys[i]: axes[keys[i]] for i in range(length)}
+            ancestor = self.find(domain=domain, axes=sub_axes)
+            if ancestor is not None:
+                try:
+                    self._link(
+                        DimPositionColumns.CONTAINED_IN,
+                        row_id=position.id,
+                        target_id=ancestor.id,
+                    )
+                except Exception:
+                    pass
 
     def _count_in_domain_depth(self, *, domain: str, depth: int) -> int:
         """Count rows currently at this `(domain, depth)`. Used for code generation."""
