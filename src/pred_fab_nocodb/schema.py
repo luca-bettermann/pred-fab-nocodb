@@ -66,6 +66,7 @@ class DimPositionColumns:
     DOMAIN = "domain"
     DEPTH = "depth"
     AXES = "axes"
+    CONTAINED_IN = "contained_in"  # self-link to ancestor dim_positions
 
 
 class StudyConstantColumns:
