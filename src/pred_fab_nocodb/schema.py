@@ -30,6 +30,7 @@ class StudyColumns:
     STARTED_AT = "started_at"
     ENDED_AT = "ended_at"
     SCHEMA = "schema"
+    DATASETS = "datasets"  # LinkToAnotherRecord -> datasets (nullable)
 
 
 class ExperimentColumns:
