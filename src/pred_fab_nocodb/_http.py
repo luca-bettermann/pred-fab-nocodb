@@ -29,6 +29,8 @@ class _NocoDBHttp:
 
     # ─── Records API ──────────────────────────────────────────────────
 
+    _PAGE_SIZE = 200
+
     def records_list(
         self,
         table_id: str,
@@ -39,21 +41,37 @@ class _NocoDBHttp:
         offset: int | None = None,
         sort: str | None = None,
     ) -> list[dict[str, Any]]:
-        """`GET /api/v2/tables/{tableId}/records` — return the row list (paginated by NocoDB)."""
+        """`GET /api/v2/tables/{tableId}/records` — auto-paginates to fetch all rows."""
         params: dict[str, Any] = {}
         if where is not None:
             params["where"] = where
         if fields is not None:
             params["fields"] = ",".join(fields)
-        if limit is not None:
-            params["limit"] = limit
-        if offset is not None:
-            params["offset"] = offset
         if sort is not None:
             params["sort"] = sort
-        body = self._request("GET", f"/api/v2/tables/{table_id}/records", params=params)
-        rows = body.get("list", [])
-        return rows if isinstance(rows, list) else []
+
+        if limit is not None:
+            params["limit"] = limit
+            if offset is not None:
+                params["offset"] = offset
+            body = self._request("GET", f"/api/v2/tables/{table_id}/records", params=params)
+            rows = body.get("list", [])
+            return rows if isinstance(rows, list) else []
+
+        all_rows: list[dict[str, Any]] = []
+        current_offset = offset or 0
+        while True:
+            params["limit"] = self._PAGE_SIZE
+            params["offset"] = current_offset
+            body = self._request("GET", f"/api/v2/tables/{table_id}/records", params=params)
+            page = body.get("list", [])
+            if not isinstance(page, list):
+                break
+            all_rows.extend(page)
+            if len(page) < self._PAGE_SIZE:
+                break
+            current_offset += self._PAGE_SIZE
+        return all_rows
 
     def records_get(self, table_id: str, record_id: int) -> dict[str, Any]:
         """`GET /api/v2/tables/{tableId}/records/{rowId}`."""
