@@ -29,6 +29,7 @@ class ValueRow:
     experiment_id: int
     fk_code: str  # the param/feature/attribute code this row references
     dim_id: Optional[int]
+    axes: dict[str, int]  # resolved from dim_positions; empty when dim is null
     value: Any  # str for params, float for features/attributes
 
 
@@ -434,12 +435,21 @@ class ValueClient(_BaseTableClient):
         return rows[0]
 
     def _row_to_value(self, row: dict[str, Any]) -> ValueRow:
+        dim_id = self._extract_dim_id(row.get(ParamColumns.DIM))
+        axes: dict[str, int] = {}
+        if dim_id is not None:
+            try:
+                pos = self._dim_client.get(dim_id)
+                axes = dict(pos.axes)
+            except Exception:
+                pass
         return ValueRow(
             id=int(row[ParamColumns.ID]),
             code=str(row[ParamColumns.CODE]),
             experiment_id=self._extract_link_id(row.get(ParamColumns.EXPERIMENT)) or 0,
             fk_code=str(row.get(self._fk_col, "")),
-            dim_id=self._extract_dim_id(row.get(ParamColumns.DIM)),
+            dim_id=dim_id,
+            axes=axes,
             value=row.get(ParamColumns.VALUE),
         )
 
