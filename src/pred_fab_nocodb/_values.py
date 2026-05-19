@@ -299,7 +299,18 @@ class ValueClient(_BaseTableClient):
                 f"~and({ParamColumns.DIM},blank,)"
             ),
         )
-        return {str(r[self._fk_col]): r[ParamColumns.VALUE] for r in rows if self._fk_col in r}
+        result: dict[str, Any] = {}
+        for r in rows:
+            if self._fk_col not in r:
+                continue
+            raw = r[ParamColumns.VALUE]
+            if isinstance(raw, str):
+                try:
+                    raw = int(raw) if raw.lstrip("-").isdigit() else float(raw)
+                except (ValueError, AttributeError):
+                    pass
+            result[str(r[self._fk_col])] = raw
+        return result
 
     def read_trajectory(
         self,
@@ -368,7 +379,13 @@ class ValueClient(_BaseTableClient):
             dim_id = self._extract_dim_id(r.get(ParamColumns.DIM))
             if dim_id is None:
                 continue
-            by_dim.setdefault(dim_id, {})[code] = r[ParamColumns.VALUE]
+            raw = r[ParamColumns.VALUE]
+            if isinstance(raw, str):
+                try:
+                    raw = int(raw) if raw.lstrip("-").isdigit() else float(raw)
+                except (ValueError, AttributeError):
+                    pass
+            by_dim.setdefault(dim_id, {})[code] = raw
 
         events: list[ParameterUpdateEvent] = []
         for dim_id, updates in by_dim.items():
