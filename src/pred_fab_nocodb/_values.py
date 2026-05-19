@@ -383,11 +383,11 @@ class ValueClient(_BaseTableClient):
             events.append(
                 ParameterUpdateEvent(
                     updates=dict(updates),
-                    dimension=dim,
+                    iterator_code=dim,
                     step_index=int(step),
                 )
             )
-        events.sort(key=lambda e: (e.dimension or "", e.step_index or 0))
+        events.sort(key=lambda e: (e.iterator_code or "", e.step_index or 0))
         return events
 
     # ─── Internal ──────────────────────────────────────────────────────

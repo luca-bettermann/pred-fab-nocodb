@@ -162,14 +162,14 @@ class WorkflowsClient:
                 "`domain` is required when parameter_updates is non-empty"
             )
         for event in plan.parameter_updates:
-            if event.dimension is None or event.step_index is None:
+            if event.iterator_code is None or event.step_index is None:
                 raise ValueError(
-                    "parameter_updates entries must set both dimension and "
+                    "parameter_updates entries must set both iterator_code and "
                     "step_index for nocodb writes "
-                    f"(got dimension={event.dimension!r}, "
+                    f"(got iterator_code={event.iterator_code!r}, "
                     f"step_index={event.step_index!r})"
                 )
-            axes = {event.dimension: int(event.step_index)}
+            axes = {event.iterator_code: int(event.step_index)}
             for code, value in event.updates.items():
                 items.append(
                     ValueWriteItem(

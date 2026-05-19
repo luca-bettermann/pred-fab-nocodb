@@ -19,12 +19,12 @@ class ParameterUpdateEvent:
     """Immutable record of a parameter update at a specific fabrication step.
 
     A single event bundles every ``(value_code, value)`` pair that changed
-    at one ``(dimension, step_index)`` position. Consumers carry-forward
+    at one ``(iterator_code, step_index)`` position. Consumers carry-forward
     through unchanged steps.
     """
 
     updates: dict[str, Any]
-    dimension: str | None = None
+    iterator_code: str | None = None
     step_index: int | None = None
     source_step: str | None = None
 
@@ -33,7 +33,7 @@ class ParameterUpdateEvent:
         ``ParameterUpdateEvent.from_dict``."""
         return {
             "updates": dict(self.updates),
-            "dimension": self.dimension,
+            "iterator_code": self.iterator_code,
             "step_index": self.step_index,
             "source_step": self.source_step,
         }
@@ -42,7 +42,7 @@ class ParameterUpdateEvent:
     def from_dict(cls, data: dict[str, Any]) -> ParameterUpdateEvent:
         return cls(
             updates=dict(data.get("updates", {})),
-            dimension=data.get("dimension"),
+            iterator_code=data.get("iterator_code") or data.get("dimension"),
             step_index=data.get("step_index"),
             source_step=data.get("source_step"),
         )
