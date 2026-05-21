@@ -111,7 +111,7 @@ def _row_to_dataset(row: dict[str, Any]) -> Dataset:
         code=str(row[DatasetColumns.CODE]),
         study_id=study_id,
         name=str(row.get(DatasetColumns.NAME, "")),
-        strategy=Strategy(row.get(DatasetColumns.STRATEGY, Strategy.BASELINE.value)),
+        strategy=Strategy(row.get(DatasetColumns.STRATEGY, Strategy.DISCOVERY.value)),
         purpose=Purpose(row.get(DatasetColumns.PURPOSE, Purpose.TRAIN.value)),
         description=row.get(DatasetColumns.DESCRIPTION),
     )

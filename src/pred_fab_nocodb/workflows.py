@@ -121,7 +121,7 @@ class WorkflowsClient:
         plan: ExperimentPlan,
         dataset_code: Optional[str] = None,
         domain: Optional[str] = None,
-        strategy: Strategy = Strategy.BASELINE,
+        strategy: Strategy = Strategy.DISCOVERY,
         purpose: Purpose = Purpose.TRAIN,
     ) -> int:
         """Create a draft experiment + write all its parameters in one shot.

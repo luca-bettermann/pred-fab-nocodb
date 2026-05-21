@@ -126,7 +126,7 @@ class Strategy(StrEnum):
     """Dataset strategies — *how* experiments are generated."""
 
     GRID = "grid"
-    BASELINE = "baseline"
+    DISCOVERY = "discovery"
     EXPLORATION = "exploration"
     INFERENCE = "inference"
 
