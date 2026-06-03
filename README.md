@@ -17,7 +17,7 @@ from pred_fab_nocodb import NocoDBClient, Status
 client = NocoDBClient(base_url="...", api_token="...", base_id="...")
 
 study = client.studies.get_by_code("ADVEI_2026")
-exp = client.experiments.create(study_id=study.id, code="ADVEI_2026_001")
+exp = client.experiments.upsert(study_id=study.id, code="ADVEI_2026_001")
 client.params.write(exp_id=exp.id, exp_code=exp.code,
                     value_code="path_offset", value="2.5")
 ```
@@ -34,7 +34,7 @@ client.params.write(exp_id=exp.id, exp_code=exp.code,
 |---|---|
 | `get_by_code(code)` | Fetch study by code |
 | `list_all()` | List all studies |
-| `create(*, code, description=None)` | Create a study |
+| `upsert(*, code, description=None)` | Create or update a study, keyed by code (idempotent) |
 
 ### `client.experiments`
 
@@ -43,7 +43,8 @@ client.params.write(exp_id=exp.id, exp_code=exp.code,
 | `get_by_code(code)` | Fetch experiment by code |
 | `list_by_study(study_id, *, status=None)` | Experiments in a study, optional status filter |
 | `list_by_dataset(dataset_id)` | Experiments in a dataset |
-| `create(*, study_id, code, status=DRAFT, dataset_id=None, notes=None)` | Create an experiment |
+| `list_codes(dataset=None)` | All experiment codes (code column only); `dataset` restricts by code-prefix namespace |
+| `upsert(*, study_id, code, status=DRAFT, dataset_id=None, notes=None)` | Create or update an experiment, keyed by code (idempotent) |
 | `update_status(experiment_id, status)` | Change status |
 | `update_timestamps(experiment_id, *, started_at=None, ended_at=None)` | Set start/end times |
 | `set_dataset(experiment_id, dataset_id)` | Assign or clear dataset link |
@@ -54,7 +55,7 @@ client.params.write(exp_id=exp.id, exp_code=exp.code,
 |---|---|
 | `get_by_code(code)` | Fetch dataset by code |
 | `list_by_study(study_id)` | All datasets in a study |
-| `create(*, study_id, study_code, name, strategy, purpose, description=None)` | Create a dataset |
+| `upsert(*, study_id, study_code, name, strategy, purpose, description=None)` | Create or update a dataset, keyed by code (idempotent) |
 
 ### `client.dim_positions`
 
