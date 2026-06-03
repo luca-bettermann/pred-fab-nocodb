@@ -61,6 +61,17 @@ class ExperimentsClient(_BaseTableClient):
         )
         return [_row_to_experiment(r) for r in rows]
 
+    def list_codes(self, dataset: str | None = None) -> list[str]:
+        """Every experiment code (code column only). ``dataset`` restricts by
+        code-prefix namespace (``'reference'`` → ``'reference/004'``), mirroring
+        pred-fab's ``Dataset.populate`` — distinct from ``list_by_dataset``'s
+        LTAR-link filter."""
+        rows = self._http.records_list(self._table_id, fields=[ExperimentColumns.CODE])
+        codes = [str(r[ExperimentColumns.CODE]) for r in rows]
+        if dataset is not None:
+            codes = [c for c in codes if c.startswith(f"{dataset}/") or f"/{dataset}/" in c]
+        return codes
+
     def upsert(
         self,
         *,
