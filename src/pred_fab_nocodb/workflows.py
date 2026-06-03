@@ -8,7 +8,7 @@ Composes the per-table clients into the typical lbp / fab-script recipes:
 - `load_dataset` (lbp ← NocoDB read; constructs the bundle for pred-fab Dataset)
 
 The trajectory shape is pred-fab's :class:`ParameterUpdateEvent` end-to-end:
-sparse events with ``(dimension, step_index, updates)``. No nocodb-local
+sparse events with ``(iterator_code, step_index, updates)``. No nocodb-local
 projector / dense rebuild — the storage layer reads/writes the same value
 objects pred-fab consumes internally.
 """
@@ -55,7 +55,7 @@ class FabricationLoad:
 
         Trajectory entries are projected onto ``schedule_dim`` and emerge as
         ``{step_index: value}`` dicts per param code — the consumer carries
-        forward through unchanged steps. Events whose ``dimension`` doesn't
+        forward through unchanged steps. Events whose ``iterator_code`` doesn't
         match ``schedule_dim`` (or that lack a step index) are dropped.
 
         Precedence (later wins):
@@ -63,7 +63,7 @@ class FabricationLoad:
         """
         sparse: dict[str, dict[int, Any]] = {}
         for event in self.parameter_updates:
-            if event.dimension != schedule_dim or event.step_index is None:
+            if event.iterator_code != schedule_dim or event.step_index is None:
                 continue
             for code, value in event.updates.items():
                 sparse.setdefault(code, {})[int(event.step_index)] = value
@@ -129,7 +129,7 @@ class WorkflowsClient:
         Each :class:`ParameterUpdateEvent` in ``plan.parameter_updates``
         produces one row per ``(value_code, value)`` pair in its ``updates``
         dict, all sharing the dim_position resolved from
-        ``{event.dimension: event.step_index}``. ``domain`` is required when
+        ``{event.iterator_code: event.step_index}``. ``domain`` is required when
         ``parameter_updates`` is non-empty (the dim_position needs a domain).
 
         Returns the new experiment id.

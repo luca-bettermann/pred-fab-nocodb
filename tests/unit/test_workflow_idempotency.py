@@ -216,7 +216,7 @@ def test_advei_grid_plan_writes_sparse_param_rows(workspace):
         parameter_updates=[
             ParameterUpdateEvent(
                 updates={"V_fab": 0.006, "slowdownFactor": 0.45},
-                dimension="layer_idx", step_index=0,
+                iterator_code="layer_idx", step_index=0,
             ),
         ],
     )
@@ -266,13 +266,13 @@ def test_plan_experiment_idempotent(workspace):
         static_params={"calibrationFactor": 1.9, "H_layer": 2.5},
         parameter_updates=[
             ParameterUpdateEvent(
-                updates={"V_fab": 0.005}, dimension="layer_idx", step_index=0,
+                updates={"V_fab": 0.005}, iterator_code="layer_idx", step_index=0,
             ),
             ParameterUpdateEvent(
-                updates={"V_fab": 0.006}, dimension="layer_idx", step_index=1,
+                updates={"V_fab": 0.006}, iterator_code="layer_idx", step_index=1,
             ),
             ParameterUpdateEvent(
-                updates={"V_fab": 0.007}, dimension="layer_idx", step_index=2,
+                updates={"V_fab": 0.007}, iterator_code="layer_idx", step_index=2,
             ),
         ],
     )
@@ -354,10 +354,10 @@ def test_full_round_trip_idempotent(workspace):
         static_params={"calibrationFactor": 1.9, "H_layer": 2.5},
         parameter_updates=[
             ParameterUpdateEvent(
-                updates={"V_fab": 0.005}, dimension="layer_idx", step_index=0,
+                updates={"V_fab": 0.005}, iterator_code="layer_idx", step_index=0,
             ),
             ParameterUpdateEvent(
-                updates={"V_fab": 0.006}, dimension="layer_idx", step_index=1,
+                updates={"V_fab": 0.006}, iterator_code="layer_idx", step_index=1,
             ),
         ],
     )

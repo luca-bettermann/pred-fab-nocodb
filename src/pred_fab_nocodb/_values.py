@@ -352,14 +352,14 @@ class ValueClient(_BaseTableClient):
         :class:`ParameterUpdateEvent` whose ``updates`` dict bundles every
         ``(value_code, value)`` at that step. Each row's dim_position must
         be single-axis; multi-axis positions raise ``ValidationError`` since
-        the canonical ``ParameterUpdateEvent`` carries one ``(dimension,
+        the canonical ``ParameterUpdateEvent`` carries one ``(iterator_code,
         step_index)`` pair only.
 
         Use this on the params client; features and attributes (which may
         carry multi-axis positions like ``{layer_idx, node_idx}``) should
         go through :meth:`read_trajectory` instead.
 
-        Returns events sorted by ``(dimension, step_index)``. The shape is
+        Returns events sorted by ``(iterator_code, step_index)``. The shape is
         the same one pred-fab uses internally
         (``ExperimentData.parameter_updates``), so the two layers exchange
         events directly without translation.

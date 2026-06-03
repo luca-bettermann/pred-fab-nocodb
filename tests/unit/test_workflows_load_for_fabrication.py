@@ -32,9 +32,9 @@ class _ExperimentsStub:
 
 @dataclass
 class _StudyConstantsStub:
-    by_study_code: dict[str, dict[str, float]] = field(default_factory=dict)
+    by_study_code: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    def read(self, study_code: str) -> dict[str, float]:
+    def read(self, study_code: str) -> dict[str, Any]:
         return self.by_study_code.get(study_code, {})
 
 
@@ -65,13 +65,13 @@ def _seed_basic(client: _FakeClient) -> None:
     client.params.static["exp1"] = {"path_offset": 1.5, "layer_height": 3.0}
     client.params.events["exp1"] = [
         ParameterUpdateEvent(
-            updates={"print_speed": 0.005}, dimension="layer_idx", step_index=0,
+            updates={"print_speed": 0.005}, iterator_code="layer_idx", step_index=0,
         ),
         ParameterUpdateEvent(
-            updates={"print_speed": 0.006}, dimension="layer_idx", step_index=3,
+            updates={"print_speed": 0.006}, iterator_code="layer_idx", step_index=3,
         ),
         ParameterUpdateEvent(
-            updates={"print_speed": 0.008}, dimension="layer_idx", step_index=7,
+            updates={"print_speed": 0.008}, iterator_code="layer_idx", step_index=7,
         ),
     ]
 
@@ -91,7 +91,7 @@ def test_load_for_fabrication_returns_static_constants_and_events():
     assert load.static_params == {"path_offset": 1.5, "layer_height": 3.0}
     assert len(load.parameter_updates) == 3
     assert {e.step_index for e in load.parameter_updates} == {0, 3, 7}
-    assert all(e.dimension == "layer_idx" for e in load.parameter_updates)
+    assert all(e.iterator_code == "layer_idx" for e in load.parameter_updates)
 
 
 def test_load_for_fabrication_empty_events_when_no_trajectory():
@@ -134,7 +134,7 @@ def test_as_overrides_precedence_trajectory_over_static_over_constants():
     client.params.events["exp1"] = [
         ParameterUpdateEvent(
             updates={"shared": "from_trajectory"},
-            dimension="layer_idx",
+            iterator_code="layer_idx",
             step_index=0,
         ),
     ]
@@ -153,10 +153,10 @@ def test_as_overrides_drops_events_for_other_dimensions():
     client.params.static["exp1"] = {"path_offset": 1.5}
     client.params.events["exp1"] = [
         ParameterUpdateEvent(
-            updates={"foo": 1.0}, dimension="layer_idx", step_index=0,
+            updates={"foo": 1.0}, iterator_code="layer_idx", step_index=0,
         ),
         ParameterUpdateEvent(
-            updates={"bar": 2.0}, dimension="time_s", step_index=10,
+            updates={"bar": 2.0}, iterator_code="time_s", step_index=10,
         ),
     ]
     workflows = WorkflowsClient(client)  # type: ignore[arg-type]

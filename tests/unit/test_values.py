@@ -240,7 +240,7 @@ def test_read_static_filters_to_null_dim(fake_http):
         ],
     )
     static = params.read_static("exp_001")
-    assert static == {"path_offset": "2.5"}
+    assert static == {"path_offset": 2.5}
 
 
 def test_read_methods_filter_by_ltar_code_not_id(fake_http):
@@ -257,7 +257,7 @@ def test_read_methods_filter_by_ltar_code_not_id(fake_http):
         ],
     )
     # Filtering by code returns the row.
-    assert params.read_static("ADVEI_2026/reference/000") == {"pathOffset": "1.5"}
+    assert params.read_static("ADVEI_2026/reference/000") == {"pathOffset": 1.5}
     # Filtering by stringified id does NOT — would silently return empty if
     # someone reverts the fix.
     assert params.read_static("71") == {}
