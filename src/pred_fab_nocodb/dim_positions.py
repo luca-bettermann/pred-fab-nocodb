@@ -150,6 +150,12 @@ class DimPositionsClient(_BaseTableClient):
         """Bulk version of `get_or_create`. Reuses the cache."""
         return [self.get_or_create(domain=domain, axes=axes) for axes in axes_list]
 
+    def prefetch(self, domain: str) -> None:
+        """Warm the (domain, axes) cache with one query, so subsequent
+        ``find`` / ``get_or_create`` for existing positions need no round-trip."""
+        for pos in self.list_by_domain(domain=domain):
+            self._cache[(domain, canonicalize_axes(pos.axes))] = pos
+
     # ─── Internal ──────────────────────────────────────────────────────
 
     def _link_ancestors(

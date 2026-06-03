@@ -262,6 +262,9 @@ def _matches_where(row: dict[str, Any], where: Optional[str]) -> bool:
         elif op == "notblank":
             if _is_null(cell):
                 return False
+        elif op == "like":
+            if not _like_matches(cell, value):
+                return False
         else:
             return False
     return True
@@ -289,6 +292,22 @@ def _link_matches(item: dict[str, Any], value: str) -> bool:
     """
     code = item.get("code")
     return code is not None and str(code) == value
+
+
+def _like_matches(cell: Any, pattern: str) -> bool:
+    """SQL-LIKE-ish match for the fake. Treats only ``%`` as a wildcard (NOT
+    ``_``) — enough for the code-prefix queries the value clients issue."""
+    s = "" if cell is None else str(cell)
+    if "%" not in pattern:
+        return s == pattern
+    if pattern.startswith("%") and pattern.endswith("%"):
+        return pattern[1:-1] in s
+    if pattern.endswith("%"):
+        return s.startswith(pattern[:-1])
+    if pattern.startswith("%"):
+        return s.endswith(pattern[1:])
+    pre, suf = pattern.split("%", 1)
+    return s.startswith(pre) and s.endswith(suf)
 
 
 def _is_null(cell: Any) -> bool:

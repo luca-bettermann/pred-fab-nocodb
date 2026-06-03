@@ -129,78 +129,84 @@ class ValueClient(_BaseTableClient):
         exp_code: str,
         items: list[ValueWriteItem],
     ) -> list[ValueRow]:
-        """Upsert each row, batching inserts but updating individually.
+        """Upsert many values for one experiment in O(1) round-trips in N.
 
-        Splits items by whether their derived row code already exists:
-          - new rows go into a single bulk records-create
-          - existing rows get individual records-update PATCHes
-        Link fields are re-asserted afterwards via the /links/ endpoint
-        (NocoDB v2's records endpoint silently drops link-field values
-        regardless of single vs bulk; the /links/ path is the only
-        reliable wire).
+        Warm the dim cache (one list per domain) → one bulk read of the
+        experiment's existing rows → bulk insert + bulk update → one code-keyed
+        re-read to resolve ids → assert links from the parent side (one /links/
+        call for the experiment, one per dim). Result rows are built in memory;
+        no per-row re-fetch. Idempotent: re-running patches values and
+        re-asserts links (NocoDB treats re-linking as a no-op; its records
+        endpoint drops LTAR values, so links go via /links/).
         """
         if not items:
             return []
-        # Resolve dims (cached) and pre-compute the row code for every item.
-        per_item_dim_ids: list[Optional[int]] = []
+
+        # Warm the (domain, axes) cache once per domain so per-item dim
+        # resolution is a cache hit, not a query per row.
+        for domain in {it.domain for it in items if it.domain is not None}:
+            self._dim_client.prefetch(domain)
+
+        dim_ids: list[Optional[int]] = []
         row_codes: list[str] = []
         for item in items:
             dim_id, dim_code = self._resolve_dim(domain=item.domain, axes=item.axes)
+            dim_ids.append(dim_id)
             row_codes.append(
-                make_value_code(
-                    exp_code=exp_code, value_code=item.value_code, dim_code=dim_code,
-                )
+                make_value_code(exp_code=exp_code, value_code=item.value_code, dim_code=dim_code)
             )
-            per_item_dim_ids.append(dim_id)
 
-        # Partition into "new" (bulk insert) vs "existing" (per-row update).
+        # ONE bulk read of this experiment's existing rows, vs a lookup per row.
+        existing = self._rows_by_code_prefix(exp_code)
+
         insert_bodies: list[dict[str, Any]] = []
         update_bodies: list[dict[str, Any]] = []
-        for item, row_code in zip(items, row_codes):
-            existing = self._try_lookup_by_code(row_code)
-            if existing is None:
+        for item, code in zip(items, row_codes):
+            row = existing.get(code)
+            if row is None:
                 insert_bodies.append(
-                    self._build_body(
-                        row_code=row_code,
-                        value_code=item.value_code,
-                        value=item.value,
-                    )
+                    self._build_body(row_code=code, value_code=item.value_code, value=item.value)
                 )
             else:
-                update_bodies.append({
-                    ParamColumns.ID: int(existing[ParamColumns.ID]),
-                    ParamColumns.VALUE: item.value,
-                })
+                update_bodies.append(
+                    {ParamColumns.ID: int(row[ParamColumns.ID]), ParamColumns.VALUE: item.value}
+                )
 
         if insert_bodies:
             self._http.records_create(self._table_id, insert_bodies)
         if update_bodies:
             self._http.records_update(self._table_id, update_bodies)
 
-        # Re-fetch every row to get the (now-stable) ids, then assert links.
-        # Collect record ids first so we can issue one bulk parent-side
-        # `/links/` call per (parent_id, group_of_children) instead of 2N
-        # child-side calls (one per row × each LTAR). Falls back to per-row
-        # child-side calls when the reverse-link map isn't resolved (unit
-        # tests that don't seed `colOptions`).
-        record_ids: list[int] = []
+        # Resolve every row's id by code in one read; existing rows already had
+        # ids, so re-read only when something was inserted (order-independent —
+        # no reliance on the insert response's shape or ordering).
+        code_to_id: dict[str, int] = {c: int(r[ParamColumns.ID]) for c, r in existing.items()}
+        if insert_bodies:
+            code_to_id = {
+                code: int(r[ParamColumns.ID])
+                for code, r in self._rows_by_code_prefix(exp_code).items()
+            }
+
+        record_ids = [code_to_id[c] for c in row_codes]
         record_ids_by_dim: dict[int, list[int]] = {}
-        for row_code, dim_id in zip(row_codes, per_item_dim_ids):
-            row = self._lookup_by_code(row_code)
-            record_id = int(row[ParamColumns.ID])
-            record_ids.append(record_id)
+        for record_id, dim_id in zip(record_ids, dim_ids):
             if dim_id is not None:
                 record_ids_by_dim.setdefault(dim_id, []).append(record_id)
 
-        # 1 call linking every child row → exp_id (from the experiment side).
+        # One parent-side /links/ call for the experiment, one per unique dim.
         self._safe_link_batch(ParamColumns.EXPERIMENT, exp_id, record_ids)
-
-        # K calls for dim links — one per unique dim_id, batching its child rows.
         for dim_id, child_ids in record_ids_by_dim.items():
             self._safe_link_batch(ParamColumns.DIM, dim_id, child_ids)
 
-        # Re-fetch each row to capture the now-asserted links in the returned ValueRow.
-        return [self._row_to_value(self._lookup_by_code(row_code)) for row_code in row_codes]
+        # Build results in memory — id, code, link targets and value are all known.
+        return [
+            ValueRow(
+                id=code_to_id[code], code=code, experiment_id=exp_id,
+                fk_code=item.value_code, dim_id=dim_id,
+                axes=dict(item.axes) if item.axes else {}, value=item.value,
+            )
+            for item, code, dim_id in zip(items, row_codes, dim_ids)
+        ]
 
     def _safe_link_batch(
         self,
@@ -450,6 +456,19 @@ class ValueClient(_BaseTableClient):
         if not rows:
             raise RuntimeError(f"Value row with code={row_code!r} not found after insert")
         return rows[0]
+
+    def _rows_by_code_prefix(self, exp_code: str) -> dict[str, dict[str, Any]]:
+        """Every row whose code is in this experiment's namespace, keyed by
+        code. Matched by code prefix (link-independent); the client-side
+        re-check guards against '_' being treated as a LIKE wildcard."""
+        prefix = f"{exp_code}/"
+        return {
+            str(r[ParamColumns.CODE]): r
+            for r in self._http.records_list(
+                self._table_id, where=f"({ParamColumns.CODE},like,{prefix}%)"
+            )
+            if str(r[ParamColumns.CODE]).startswith(prefix)
+        }
 
     def _row_to_value(self, row: dict[str, Any]) -> ValueRow:
         dim_id = self._extract_dim_id(row.get(ParamColumns.DIM))

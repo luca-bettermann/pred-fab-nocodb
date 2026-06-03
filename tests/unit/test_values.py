@@ -220,6 +220,55 @@ def test_write_batch_is_idempotent_on_repeat(fake_http):
     assert values == ["0.007", "0.008"]
 
 
+def test_write_batch_constant_round_trips_in_n(fake_http):
+    """write_batch issues a fixed number of value-table reads regardless of N —
+    no per-row existence/refetch lookups (the old O(N) bottleneck)."""
+    _dim, params = _make_clients(fake_http)
+
+    def items(n):
+        return [
+            ValueWriteItem(value_code="print_speed", value=str(i),
+                           domain="structural:nodes", axes={"layer_idx": i})
+            for i in range(n)
+        ]
+
+    def value_reads():
+        return sum(1 for c in fake_http.calls
+                   if c[0] == "records_list" and c[1] == "set_exp_params")
+
+    fake_http.calls.clear()
+    params.write_batch(exp_id=1, exp_code="exp_a", items=items(4))
+    small = value_reads()
+
+    fake_http.calls.clear()
+    params.write_batch(exp_id=2, exp_code="exp_b", items=items(16))
+    large = value_reads()
+
+    assert small == large    # constant in N
+    assert small <= 2        # bulk pre-read + one id re-read; no per-row lookups
+
+
+def test_write_batch_returns_correct_rows(fake_http):
+    """Returned ValueRows are built in memory and carry the right fields."""
+    _dim, params = _make_clients(fake_http)
+    rows = params.write_batch(
+        exp_id=7, exp_code="exp_x",
+        items=[
+            ValueWriteItem(value_code="print_speed", value="0.05",
+                           domain="structural:nodes", axes={"layer_idx": 2}),
+            ValueWriteItem(value_code="path_offset", value="1.5"),  # static, no dim
+        ],
+    )
+    by_code = {r.code: r for r in rows}
+    assert set(by_code) == {"exp_x/print_speed/structural:nodes.d1.0", "exp_x/path_offset"}
+    assert all(r.experiment_id == 7 for r in rows)
+    traj = by_code["exp_x/print_speed/structural:nodes.d1.0"]
+    assert traj.dim_id is not None and traj.axes == {"layer_idx": 2} and traj.value == "0.05"
+    static = by_code["exp_x/path_offset"]
+    assert static.dim_id is None and static.axes == {} and static.value == "1.5"
+    assert len(fake_http.get_records("set_exp_params")) == 2
+
+
 def test_read_static_filters_to_null_dim(fake_http):
     _dim, params = _make_clients(fake_http)
     fake_http.set_records(
