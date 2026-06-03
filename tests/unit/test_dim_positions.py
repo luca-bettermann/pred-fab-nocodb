@@ -51,6 +51,30 @@ def test_find_returns_none_when_absent(fake_http):
     assert client.find(domain="d", axes={"layer_idx": 0}) is None
 
 
+def test_link_ancestors_writes_contained_in(fake_http):
+    """A multi-axis dim links to its prefix ancestor via the contained_in self-link."""
+    fake_http.set_records("dim_positions", [])
+    client = DimPositionsClient(
+        fake_http, base_id="b1", table_id="dim_positions",
+        link_field_ids={DimPositionColumns.CONTAINED_IN: "fld_contained_in"},
+    )
+    parent = client.get_or_create(domain="d", axes={"layer_idx": 0})
+    child = client.get_or_create(domain="d", axes={"layer_idx": 0, "node_idx": 0})
+    assert any(
+        fid == "fld_contained_in" and rid == child.id and parent.id in linked
+        for (_tid, fid, rid, linked) in fake_http.link_calls
+    )
+
+
+def test_link_ancestors_skipped_without_link_field(fake_http):
+    """A client without the self-link field skips linking instead of erroring."""
+    fake_http.set_records("dim_positions", [])
+    client = DimPositionsClient(fake_http, base_id="b1", table_id="dim_positions")
+    client.get_or_create(domain="d", axes={"layer_idx": 0})
+    client.get_or_create(domain="d", axes={"layer_idx": 0, "node_idx": 0})
+    assert fake_http.link_calls == []
+
+
 def test_list_by_domain_with_depth_filter(fake_http):
     fake_http.set_records(
         "dim_positions",

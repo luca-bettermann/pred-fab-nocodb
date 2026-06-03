@@ -165,19 +165,20 @@ class DimPositionsClient(_BaseTableClient):
         ``{"layers": 3, "nodes": 5}``, the ancestor is the dim with
         axes ``{"layers": 3}``.
         """
+        # No self-link field configured (e.g. a limited client) → can't maintain
+        # the hierarchy; skip. When it IS configured, link errors propagate (no swallow).
+        if DimPositionColumns.CONTAINED_IN not in self._link_field_ids:
+            return
         keys = list(axes.keys())
         for length in range(1, len(keys)):
             sub_axes = {keys[i]: axes[keys[i]] for i in range(length)}
             ancestor = self.find(domain=domain, axes=sub_axes)
             if ancestor is not None:
-                try:
-                    self._link(
-                        DimPositionColumns.CONTAINED_IN,
-                        row_id=position.id,
-                        target_id=ancestor.id,
-                    )
-                except Exception:
-                    pass
+                self._link(
+                    DimPositionColumns.CONTAINED_IN,
+                    record_id=position.id,
+                    linked=ancestor.id,
+                )
 
     def _count_in_domain_depth(self, *, domain: str, depth: int) -> int:
         """Count rows currently at this `(domain, depth)`. Used for code generation."""

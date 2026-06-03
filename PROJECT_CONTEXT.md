@@ -18,14 +18,16 @@ Typed read/write access to a NocoDB workspace structured per the pred-fab schema
 | `src/pred_fab_nocodb/errors.py` | Exception types |
 | `src/pred_fab_nocodb/_http.py` | HTTP wrapper (auth, error mapping) — internal |
 | `src/pred_fab_nocodb/_base.py` | `_BaseTableClient` shared base — internal |
-| `src/pred_fab_nocodb/_axes.py` | Axes canonicalisation + dim-position code generation |
+| `src/pred_fab_nocodb/_axes.py` | Axes canonicalisation (sorted-key JSON) — internal |
+| `src/pred_fab_nocodb/_codes.py` | Row-code generators per table (`make_dim_position_code`, `make_value_code`, …) — internal |
 | `src/pred_fab_nocodb/_values.py` | `ValueClient` for params / features / attributes |
 | `src/pred_fab_nocodb/studies.py` | `StudiesClient` + `Study` dataclass |
 | `src/pred_fab_nocodb/experiments.py` | `ExperimentsClient` + `Experiment` dataclass |
+| `src/pred_fab_nocodb/datasets.py` | `DatasetsClient` + `Dataset` dataclass |
 | `src/pred_fab_nocodb/dim_positions.py` | `DimPositionsClient` + `DimPosition` dataclass |
 | `src/pred_fab_nocodb/study_constants.py` | `StudyConstantsClient` |
-| `src/pred_fab_nocodb/workflows.py` | `WorkflowsClient` + payload dataclasses (`FabricationLoad`, `ExperimentBundle`, `ExperimentPlan`) |
-| `src/pred_fab_nocodb/_projector.py` | Per-dimension projection of sparse trajectory entries (`{(axes_dict, value), …}` → `{step_index: value, …}`) — internal, used by `WorkflowsClient.load_for_fabrication(schedule_dim=…)` |
+| `src/pred_fab_nocodb/workflows.py` | `WorkflowsClient` + payload dataclasses (`FabricationLoad`, `ExperimentBundle`, `ExperimentPlan`). Trajectory projection to a schedule axis lives on `FabricationLoad.as_overrides(schedule_dim=…)` |
+| `src/pred_fab_nocodb/events.py` | `ParameterUpdateEvent` — sparse trajectory value object, mirrored from pred-fab |
 | `src/pred_fab_nocodb/schema_validator.py` | `SchemaValidator` — recursive diff + `assert_compatible` for study schema dicts |
 
 ## Key points
@@ -34,7 +36,7 @@ Typed read/write access to a NocoDB workspace structured per the pred-fab schema
 - `dim_positions` codes generated as `'{domain}.d{depth}.{count}'`; counter is per-`(domain, depth)`.
 - `axes` JSON stored canonically (sorted keys, no whitespace) to enable `UNIQUE(domain, axes)`.
 - `ValueClient` is one parameterised class used by `params`, `features`, `attributes` (identical table shape).
-- `_HttpClient` is the only direct REST surface; tests substitute a fake.
+- `_NocoDBHttp` (`_http.py`) is the only direct REST surface; tests substitute a fake.
 
 ## Open risks
 
