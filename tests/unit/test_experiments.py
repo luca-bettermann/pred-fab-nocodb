@@ -92,3 +92,18 @@ def test_upsert_round_trips_provenance(fake_http):
     exp = client.get_by_code("sobol/002")
     assert exp.design == "sobol"
     assert exp.provenance == snap
+
+
+def test_set_provenance_updates_without_clobbering_status(fake_http):
+    """The targeted updater touches only design/provenance — status survives."""
+    fake_http.set_records(
+        "experiments",
+        [{ExperimentColumns.CODE: "e1", ExperimentColumns.STATUS: "running"}],
+    )
+    client = _client(fake_http)
+    exp = client.get_by_code("e1")
+    client.set_provenance(exp.id, design="sobol", provenance={"seed": 3})
+    updated = client.get_by_code("e1")
+    assert updated.design == "sobol"
+    assert updated.provenance == {"seed": 3}
+    assert updated.status == Status.RUNNING  # untouched

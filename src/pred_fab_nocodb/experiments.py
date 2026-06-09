@@ -156,6 +156,28 @@ class ExperimentsClient(_BaseTableClient):
             {ExperimentColumns.ID: experiment_id, ExperimentColumns.DATASET: dataset_id},
         )
 
+    def set_provenance(
+        self,
+        experiment_id: int,
+        *,
+        design: Optional[str] = None,
+        provenance: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Update only the generative provenance columns — no status/link side-effects.
+
+        The targeted updater the ``push_provenance`` adapter path should use (``upsert``
+        would re-assert ``status`` and clobber a running experiment). ``design`` is a
+        :class:`Strategy` value; ``provenance`` is stored as JSON in the LongText column.
+        """
+        body: dict[str, Any] = {ExperimentColumns.ID: experiment_id}
+        if design is not None:
+            body[ExperimentColumns.DESIGN] = design
+        if provenance is not None:
+            body[ExperimentColumns.PROVENANCE] = json.dumps(provenance)
+        if len(body) == 1:
+            return  # nothing to update
+        self._http.records_update(self._table_id, body)
+
 
 def _row_to_experiment(row: dict[str, Any]) -> Experiment:
     study_id = _resolve_link_id(row.get(ExperimentColumns.STUDIES))
