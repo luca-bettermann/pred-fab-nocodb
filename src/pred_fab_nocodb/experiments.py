@@ -1,6 +1,7 @@
 """Experiments table client."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -24,6 +25,8 @@ class Experiment:
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     notes: Optional[str] = None
+    design: Optional[str] = None  # generative provenance axis (Strategy value)
+    provenance: Optional[dict[str, Any]] = None  # full generative config snapshot
 
 
 class ExperimentsClient(_BaseTableClient):
@@ -80,17 +83,27 @@ class ExperimentsClient(_BaseTableClient):
         status: Status = Status.DRAFT,
         dataset_id: Optional[int] = None,
         notes: Optional[str] = None,
+        design: Optional[str] = None,
+        provenance: Optional[dict[str, Any]] = None,
     ) -> Experiment:
         """Create or update an experiment row, keyed by ``code``.
 
         If a row with this ``code`` already exists, its non-LTAR fields
-        (``status`` and ``notes``) are patched and both link fields
-        (``studies`` + ``dataset``) are re-asserted (idempotent). Otherwise
-        a new row is inserted.
+        (``status``, ``notes``, ``design``, ``provenance``) are patched and both
+        link fields (``studies`` + ``dataset``) are re-asserted (idempotent).
+        Otherwise a new row is inserted.
+
+        ``design`` is the generative provenance axis (a :class:`Strategy` value);
+        ``provenance`` is the full generative config snapshot, stored as JSON in the
+        ``provenance`` LongText column.
         """
         body: dict[str, Any] = {ExperimentColumns.STATUS: status.value}
         if notes is not None:
             body[ExperimentColumns.NOTES] = notes
+        if design is not None:
+            body[ExperimentColumns.DESIGN] = design
+        if provenance is not None:
+            body[ExperimentColumns.PROVENANCE] = json.dumps(provenance)
 
         try:
             existing = self.get_by_code(code)
@@ -160,7 +173,23 @@ def _row_to_experiment(row: dict[str, Any]) -> Experiment:
         started_at=_parse_dt(row.get(ExperimentColumns.STARTED_AT)),
         ended_at=_parse_dt(row.get(ExperimentColumns.ENDED_AT)),
         notes=row.get(ExperimentColumns.NOTES),
+        design=row.get(ExperimentColumns.DESIGN) or None,
+        provenance=_parse_provenance(row.get(ExperimentColumns.PROVENANCE)),
     )
+
+
+def _parse_provenance(value: Any) -> Optional[dict[str, Any]]:
+    """Deserialize the ``provenance`` LongText (JSON) column to a dict; None if blank
+    or unparseable (already a dict passes through, for response-shape robustness)."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 def _resolve_link_id(value: Any) -> Optional[int]:

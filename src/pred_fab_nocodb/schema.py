@@ -44,6 +44,8 @@ class ExperimentColumns:
     STARTED_AT = "started_at"
     ENDED_AT = "ended_at"
     NOTES = "notes"
+    DESIGN = "design"          # SingleSelect — per-experiment generative design (Strategy values)
+    PROVENANCE = "provenance"  # LongText (JSON) — full generative config snapshot
 
 
 class DatasetColumns:
@@ -123,12 +125,18 @@ class Status(StrEnum):
 
 
 class Strategy(StrEnum):
-    """Dataset strategies — *how* experiments are generated."""
+    """How experiments are generated — the design.
+
+    Used both as the dataset-level strategy and as the per-experiment ``design``
+    column (the queryable provenance axis mirroring pred-fab's ``SourceStep``).
+    """
 
     GRID = "grid"
     DISCOVERY = "discovery"
     EXPLORATION = "exploration"
     INFERENCE = "inference"
+    ADAPTATION = "adaptation"
+    SOBOL = "sobol"
 
 
 class Purpose(StrEnum):
