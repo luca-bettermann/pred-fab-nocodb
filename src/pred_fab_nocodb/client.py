@@ -8,6 +8,7 @@ from ._values import ValueClient
 from .datasets import DatasetsClient
 from .dim_positions import DimPositionsClient
 from .errors import NocoDBError, ValidationError
+from .experiment_sets import ExperimentSetsClient
 from .experiments import ExperimentsClient
 from .schema import (
     AttributeColumns,
@@ -115,6 +116,14 @@ class NocoDBClient:
         self.study_constants = StudyConstantsClient(
             self._http, base_id, self._table_ids[Tables.SET_STUDY_CONSTANTS],
             link_field_ids=_links(Tables.SET_STUDY_CONSTANTS),
+        )
+
+        # Optional table — provisioned during the ExperimentSet rollout; ``None`` on bases
+        # that don't have it yet (so this is non-breaking until the table exists).
+        _all_ids = {t.get("title", ""): t.get("id", "") for t in self._http.meta_list_tables(base_id)}
+        _es_id = _all_ids.get(Tables.EXPERIMENT_SETS)
+        self.experiment_sets: ExperimentSetsClient | None = (
+            ExperimentSetsClient(self._http, base_id, _es_id) if _es_id else None
         )
 
         # Value clients — share `dim_positions` so the cache benefits all writes

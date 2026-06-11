@@ -14,6 +14,7 @@ class Tables:
     STUDIES = "studies"
     EXPERIMENTS = "experiments"
     DATASETS = "datasets"
+    EXPERIMENT_SETS = "experiment_sets"   # named groups — supersedes `datasets` (optional until provisioned)
     DIM_POSITIONS = "dim_positions"
     SET_STUDY_CONSTANTS = "set_study_constants"
     SET_EXP_PARAMS = "set_exp_params"
@@ -58,6 +59,22 @@ class DatasetColumns:
     STRATEGY = "strategy"  # how experiments were generated
     PURPOSE = "purpose"  # how they're used
     DESCRIPTION = "description"
+
+
+class ExperimentSetColumns:
+    """Columns on the `experiment_sets` table — one row per named group.
+
+    Membership is a JSON list in ``MEMBERS`` (experiment codes, in order for ordered sets):
+    a denormalised many-to-many (a set lists its members; an experiment can appear in many
+    sets), mirroring pred-fab's ``ExperimentSet.to_dict`` 1:1 — no LTAR join table needed.
+    """
+
+    ID = "Id"
+    CODE = "code"
+    STRATEGY = "strategy"      # SingleSelect — the design (Strategy values)
+    ORDERED = "ordered"        # Checkbox — sequential vs batch
+    PARENT = "parent"          # text — the parent set's code (e.g. exploration → its discovery)
+    MEMBERS = "members"        # LongText (JSON) — experiment codes, in order
 
 
 class DimPositionColumns:
