@@ -474,11 +474,10 @@ class ValueClient(_BaseTableClient):
         dim_id = self._extract_dim_id(row.get(ParamColumns.DIM))
         axes: dict[str, int] = {}
         if dim_id is not None:
-            try:
-                pos = self._dim_client.get(dim_id)
-                axes = dict(pos.axes)
-            except Exception:
-                pass
+            # A present dim_id that cannot be resolved is an error, not a silent
+            # axis loss — a trajectory row would otherwise round-trip as scalar.
+            pos = self._dim_client.get(dim_id)
+            axes = dict(pos.axes)
         return ValueRow(
             id=int(row[ParamColumns.ID]),
             code=str(row[ParamColumns.CODE]),
@@ -497,7 +496,8 @@ class ValueClient(_BaseTableClient):
             if not value:
                 return None
             first = value[0]
-            return int(first.get("Id", 0)) if isinstance(first, dict) else int(first)
+            raw = int(first.get("Id", 0)) if isinstance(first, dict) else int(first)
+            return raw or None
         if isinstance(value, dict):
             return int(value.get("Id", 0)) or None
         try:

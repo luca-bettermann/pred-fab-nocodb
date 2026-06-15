@@ -15,7 +15,7 @@ objects pred-fab consumes internally.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from ._values import ValueWriteItem
@@ -204,7 +204,7 @@ class WorkflowsClient:
         events = self._c.params.read_parameter_updates(exp.code)
         if mark_running:
             self._c.experiments.update_status(exp.id, Status.RUNNING)
-            self._c.experiments.update_timestamps(exp.id, started_at=datetime.utcnow())
+            self._c.experiments.update_timestamps(exp.id, started_at=datetime.now(timezone.utc))
 
         return FabricationLoad(
             experiment_id=exp.id,
@@ -239,7 +239,7 @@ class WorkflowsClient:
             )
         self._c.experiments.update_status(exp.id, status)
         self._c.experiments.update_timestamps(
-            exp.id, ended_at=ended_at or datetime.utcnow()
+            exp.id, ended_at=ended_at or datetime.now(timezone.utc)
         )
         if notes is not None:
             # update_status doesn't touch notes; do it via a dedicated patch
