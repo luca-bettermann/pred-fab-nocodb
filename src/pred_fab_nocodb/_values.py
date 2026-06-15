@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from ._base import _BaseTableClient
 from ._codes import make_value_code
+from ._rows import _resolve_link_id
 from .events import ParameterUpdateEvent
 from .errors import NotFoundError, ValidationError
 from .schema import ParamColumns
@@ -481,7 +482,7 @@ class ValueClient(_BaseTableClient):
         return ValueRow(
             id=int(row[ParamColumns.ID]),
             code=str(row[ParamColumns.CODE]),
-            experiment_id=self._extract_link_id(row.get(ParamColumns.EXPERIMENT)) or 0,
+            experiment_id=_resolve_link_id(row.get(ParamColumns.EXPERIMENT)) or 0,
             fk_code=str(row.get(self._fk_col, "")),
             dim_id=dim_id,
             axes=axes,
@@ -489,22 +490,5 @@ class ValueClient(_BaseTableClient):
         )
 
     @staticmethod
-    def _extract_link_id(value: Any) -> Optional[int]:
-        if value is None or value == "":
-            return None
-        if isinstance(value, list):
-            if not value:
-                return None
-            first = value[0]
-            raw = int(first.get("Id", 0)) if isinstance(first, dict) else int(first)
-            return raw or None
-        if isinstance(value, dict):
-            return int(value.get("Id", 0)) or None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
     def _extract_dim_id(value: Any) -> Optional[int]:
-        return ValueClient._extract_link_id(value)
+        return _resolve_link_id(value)

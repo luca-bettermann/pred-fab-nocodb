@@ -15,8 +15,8 @@ from typing import Any, Optional
 
 from ._base import _BaseTableClient
 from ._codes import make_dataset_code
+from ._rows import _resolve_link_id
 from .errors import NotFoundError
-from .experiments import _resolve_link_id
 from .schema import DatasetColumns, Purpose, Strategy
 
 

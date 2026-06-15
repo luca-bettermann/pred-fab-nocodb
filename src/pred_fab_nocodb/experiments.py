@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from ._base import _BaseTableClient
+from ._rows import _parse_dt, _resolve_link_code, _resolve_link_id
 from .errors import NotFoundError
 from .schema import ExperimentColumns, Status
 
@@ -214,52 +215,3 @@ def _parse_provenance(value: Any) -> Optional[dict[str, Any]]:
         return None
 
 
-def _resolve_link_id(value: Any) -> Optional[int]:
-    """NocoDB renders linked-record fields as a list of `{Id: ...}` dicts (or
-    a bare int / dict depending on response context). Normalise to int|None."""
-    if value is None or value == "":
-        return None
-    if isinstance(value, list):
-        if not value:
-            return None
-        first = value[0]
-        if isinstance(first, dict):
-            return int(first.get("Id", 0)) or None
-        return int(first)
-    if isinstance(value, dict):
-        return int(value.get("Id", 0)) or None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _resolve_link_code(value: Any) -> Optional[str]:
-    """Counterpart to `_resolve_link_id` — extracts the linked record's `code`
-    (the LTAR display value) so callers can filter by it. NocoDB v2 LTAR
-    filters compare against the display value, not the id."""
-    if value is None or value == "":
-        return None
-    if isinstance(value, list):
-        if not value:
-            return None
-        first = value[0]
-        if isinstance(first, dict):
-            code = first.get("code")
-            return str(code) if code else None
-        return None
-    if isinstance(value, dict):
-        code = value.get("code")
-        return str(code) if code else None
-    return None
-
-
-def _parse_dt(value: Any) -> Optional[datetime]:
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from ._base import _BaseTableClient
+from ._rows import _parse_dt
 from .errors import NotFoundError
 from .schema import StudyColumns
 
@@ -102,14 +103,3 @@ def _row_to_study(row: dict[str, Any]) -> Study:
         started_at=_parse_dt(row.get(StudyColumns.STARTED_AT)),
         ended_at=_parse_dt(row.get(StudyColumns.ENDED_AT)),
     )
-
-
-def _parse_dt(value: Any) -> Optional[datetime]:
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
