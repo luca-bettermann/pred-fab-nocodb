@@ -2,10 +2,12 @@
 
 NocoDB binding for the pred-fab data model.
 
-## Purpose
+- **Purpose** — typed read/write access to a NocoDB workspace structured per the pred-fab schema (studies, experiments, params, features, attributes, dim_positions, experiment_sets).
+- **Owns** — the storage boundary: table clients, row-code generation, axis canonicalisation, the HTTP wrapper.
+- **Out of scope → who** — the data model + science (`pred-fab`); fab execution (`learning-by-printing`). This repo is schema-agnostic storage — it stores values, it does not type them (see [[PFAB code audit 2026-06]] §B6: coercion is the consumer's job).
+- **Depends on** — NocoDB (external); mirrors pred-fab value objects (`ParameterUpdateEvent`). See [[Repo Dependency Graph]].
 
-Typed read/write access to a NocoDB workspace structured per the pred-fab schema (studies, experiments, params, features, attributes, dim_positions). Consumers:
-
+## Consumers
 - `learning-by-printing/` — pushes experiment results to NocoDB after a fab run
 - fabrication scripts — read parameters before running an experiment, update status during/after
 
@@ -24,6 +26,8 @@ Typed read/write access to a NocoDB workspace structured per the pred-fab schema
 | `src/pred_fab_nocodb/studies.py` | `StudiesClient` + `Study` dataclass |
 | `src/pred_fab_nocodb/experiments.py` | `ExperimentsClient` + `Experiment` dataclass |
 | `src/pred_fab_nocodb/datasets.py` | `DatasetsClient` + `Dataset` dataclass |
+| `src/pred_fab_nocodb/experiment_sets.py` | `ExperimentSetsClient` + `ExperimentSet` dataclass — named groups (members as JSON, link-free); supersedes `datasets` |
+| `src/pred_fab_nocodb/_rows.py` | Shared row-field parsers (`_resolve_link_id` / `_resolve_link_code` / `_parse_dt`) — internal |
 | `src/pred_fab_nocodb/dim_positions.py` | `DimPositionsClient` + `DimPosition` dataclass |
 | `src/pred_fab_nocodb/study_constants.py` | `StudyConstantsClient` |
 | `src/pred_fab_nocodb/workflows.py` | `WorkflowsClient` + payload dataclasses (`FabricationLoad`, `ExperimentBundle`, `ExperimentPlan`). Trajectory projection to a schedule axis lives on `FabricationLoad.as_overrides(schedule_dim=…)` |
