@@ -1,0 +1,64 @@
+[importlinter]
+root_package = pred_fab_nocodb
+
+# Flat package, three tiers: primitives (schema/errors/events/_axes/_codes/_rows)
+# < transport (_http, _base) < domain clients < facade (client). The contracts
+# below keep the lower tiers from reaching up. workflows holds a TYPE_CHECKING-
+# only back-reference to the client type (constructed with a client handle), so
+# it is intentionally excluded from the facade contract.
+
+[importlinter:contract:transport_isolation]
+name = Transport (_http, _base) imports no domain client or facade
+type = forbidden
+source_modules =
+    pred_fab_nocodb._http
+    pred_fab_nocodb._base
+forbidden_modules =
+    pred_fab_nocodb.client
+    pred_fab_nocodb.workflows
+    pred_fab_nocodb._values
+    pred_fab_nocodb.dim_positions
+    pred_fab_nocodb.experiments
+    pred_fab_nocodb.datasets
+    pred_fab_nocodb.experiment_sets
+    pred_fab_nocodb.studies
+    pred_fab_nocodb.study_constants
+
+[importlinter:contract:primitives_pure]
+name = Primitives (schema, errors, events, _axes, _codes, _rows) import no clients
+type = forbidden
+source_modules =
+    pred_fab_nocodb.schema
+    pred_fab_nocodb.errors
+    pred_fab_nocodb.events
+    pred_fab_nocodb._axes
+    pred_fab_nocodb._codes
+    pred_fab_nocodb._rows
+forbidden_modules =
+    pred_fab_nocodb.client
+    pred_fab_nocodb.workflows
+    pred_fab_nocodb._values
+    pred_fab_nocodb.dim_positions
+    pred_fab_nocodb.experiments
+    pred_fab_nocodb.datasets
+    pred_fab_nocodb.experiment_sets
+    pred_fab_nocodb.studies
+    pred_fab_nocodb.study_constants
+    pred_fab_nocodb._base
+    pred_fab_nocodb._http
+
+[importlinter:contract:facade_on_top]
+name = Only the package root constructs the NocoDBClient facade
+type = forbidden
+source_modules =
+    pred_fab_nocodb._values
+    pred_fab_nocodb.dim_positions
+    pred_fab_nocodb.experiments
+    pred_fab_nocodb.datasets
+    pred_fab_nocodb.experiment_sets
+    pred_fab_nocodb.studies
+    pred_fab_nocodb.study_constants
+    pred_fab_nocodb._base
+    pred_fab_nocodb._http
+forbidden_modules =
+    pred_fab_nocodb.client

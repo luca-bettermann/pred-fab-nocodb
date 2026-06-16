@@ -7,6 +7,31 @@ NocoDB binding for the pred-fab data model.
 - **Out of scope → who** — the data model + science (`pred-fab`); fab execution (`learning-by-printing`). This repo is schema-agnostic storage — it stores values, it does not type them (see [[PFAB code audit 2026-06]] §B6: coercion is the consumer's job).
 - **Depends on** — NocoDB (external); mirrors pred-fab value objects (`ParameterUpdateEvent`). See [[Repo Dependency Graph]].
 
+## Architecture
+
+Three tiers — primitives < transport < domain clients < facade — kept honest by
+the `import-linter` contracts in `.importlinter` (run `lint-imports`; also CI).
+Arrows = depends-on (imports); a tier imports only those below it.
+
+```mermaid
+flowchart TD
+    consumer["pred-fab / lbp adapter<br/><i>ExternalDataPort impl</i>"] --> client
+    client["NocoDBClient · facade"]
+    client --> workflows["workflows · fab load / bundles"]
+    client --> domain["entity clients<br/><i>_values · dim_positions · experiments · datasets ·<br/>experiment_sets · studies · study_constants</i>"]
+    workflows --> domain
+    domain --> base["_base · shared table client"]
+    base --> http["_http · REST wrapper (httpx)"]
+    http --> nocodb[("NocoDB REST API")]
+    domain -.->|primitives| prim["schema · errors · events · _axes · _codes · _rows"]
+    base -.->|primitives| prim
+```
+
+Contracts enforced: transport (`_http`/`_base`) imports no client; primitives
+import no client; only the package root constructs the facade. `workflows`
+keeps a `TYPE_CHECKING`-only reference to `NocoDBClient` (it is handed a client
+at construction), so that back-edge is intentionally allowed.
+
 ## Consumers
 - `learning-by-printing/` — pushes experiment results to NocoDB after a fab run
 - fabrication scripts — read parameters before running an experiment, update status during/after
