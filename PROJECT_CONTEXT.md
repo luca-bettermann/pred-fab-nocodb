@@ -10,7 +10,7 @@ NocoDB binding for the pred-fab data model.
 ## Architecture
 
 Three tiers — primitives < transport < domain clients < facade — kept honest by
-the `import-linter` contracts in `.importlinter` (run `lint-imports`; also CI).
+the `import-linter` contracts in `.importlinter` (run `lint-imports`; ready to wire into CI/pre-commit — neither exists in this repo yet).
 Arrows = depends-on (imports); a tier imports only those below it.
 
 ```mermaid
