@@ -17,13 +17,16 @@ from .schema import ExperimentSetColumns
 
 @dataclass(frozen=True)
 class ExperimentSet:
-    """One row from the `experiment_sets` table."""
+    """One row from the `experiment_sets` table.
+
+    A dumb group: ``code`` + ``ordered`` + the ``members`` JSON list. How each member was
+    *generated* (source method, κ) is per-experiment provenance, not a set field — see the
+    KB note *ExperimentSet data model refactor*.
+    """
 
     id: int
     code: str
-    strategy: str
     ordered: bool = False
-    parent: Optional[str] = None            # parent set's code
     members: list[str] = field(default_factory=list)
 
 
@@ -48,18 +51,14 @@ class ExperimentSetsClient(_BaseTableClient):
         self,
         *,
         code: str,
-        strategy: str,
         ordered: bool = False,
-        parent: Optional[str] = None,
         members: Optional[list[str]] = None,
     ) -> ExperimentSet:
         """Create or update a group row, keyed by ``code`` (members serialized to JSON)."""
         body: dict[str, Any] = {
             ExperimentSetColumns.CODE: code,
-            ExperimentSetColumns.STRATEGY: strategy,
             ExperimentSetColumns.ORDERED: bool(ordered),
             ExperimentSetColumns.MEMBERS: json.dumps(list(members or [])),
-            ExperimentSetColumns.PARENT: parent,
         }
         try:
             existing = self.get_by_code(code)
@@ -85,8 +84,6 @@ def _row_to_set(row: dict[str, Any]) -> ExperimentSet:
     return ExperimentSet(
         id=int(row[ExperimentSetColumns.ID]),
         code=str(row[ExperimentSetColumns.CODE]),
-        strategy=str(row.get(ExperimentSetColumns.STRATEGY, "")),
         ordered=bool(row.get(ExperimentSetColumns.ORDERED, False)),
-        parent=row.get(ExperimentSetColumns.PARENT) or None,
         members=[str(m) for m in members],
     )
