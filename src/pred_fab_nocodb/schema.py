@@ -71,10 +71,9 @@ class ExperimentSetColumns:
 
     ID = "Id"
     CODE = "code"
-    STRATEGY = "strategy"      # SingleSelect — the design (Strategy values)
     ORDERED = "ordered"        # Checkbox — sequential vs batch
-    PARENT = "parent"          # text — the parent set's code (e.g. exploration → its discovery)
     MEMBERS = "members"        # LongText (JSON) — experiment codes, in order
+    # Generation (source method, κ) is per-experiment provenance, not a set field.
 
 
 class DimPositionColumns:
