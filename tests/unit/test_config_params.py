@@ -61,7 +61,15 @@ def test_full_row_with_category_bounds_and_list(fake_http):
     p = c.get_by_code("tool_offset")
     assert p.scope == "per_rig" and p.category == "hardware"
     assert p.min == "0.0" and p.max == "50.0"
+    assert p.coerced_min == pytest.approx(0.0) and p.coerced_max == pytest.approx(50.0)  # coerced per type
     assert c.get_by_code("cam_pairs").coerced == [[0, 1], [2, 3]]   # LIST round-trips via JSON
+
+
+def test_coerced_bounds_none_when_unset(fake_http):
+    c = _client(fake_http)
+    c.upsert(code="freeform", value="x", value_type=ConfigType.CATEGORICAL)
+    p = c.get_by_code("freeform")
+    assert p.coerced_min is None and p.coerced_max is None
 
 
 # ===== value-preserving upsert (the core contract) =====

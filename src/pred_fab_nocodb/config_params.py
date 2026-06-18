@@ -30,6 +30,24 @@ class ConfigType(str, Enum):
     LIST = "list"
 
 
+class ConfigScope(str, Enum):
+    """A param's editability/nature (the screenshot groups). Constrained → a SingleSelect
+    column. Screenshot-derived; extend-when-rare if rtde's config carries another value."""
+
+    KNOB = "knob"            # editable per experiment
+    CONSTANT = "constant"    # read-only
+    PER_RIG = "per_rig"      # editable per rig
+
+
+class ConfigCategory(str, Enum):
+    """The cockpit tab a param belongs to. Constrained → a SingleSelect column."""
+
+    EXPERIMENT = "experiment"
+    PROCESS = "process"
+    HARDWARE = "hardware"
+    SERVICES = "services"
+
+
 _TRUE = {"true", "1", "yes", "on"}
 _FALSE = {"false", "0", "no", "off"}
 
@@ -85,6 +103,20 @@ class ConfigParam:
     def coerced(self) -> Any:
         """The value coerced to its declared :class:`ConfigType`."""
         return coerce_value(self.value, self.type)
+
+    @property
+    def coerced_min(self) -> Any:
+        """The lower sanity bound coerced to the param's type (``None`` if unset).
+
+        Bounds share the param's type (a real's bounds are reals); rtde's preflight
+        safety check reads these for the params the collision gate computes with.
+        """
+        return None if self.min is None else coerce_value(self.min, self.type)
+
+    @property
+    def coerced_max(self) -> Any:
+        """The upper sanity bound coerced to the param's type (``None`` if unset)."""
+        return None if self.max is None else coerce_value(self.max, self.type)
 
 
 class ConfigParamsClient(_BaseTableClient):

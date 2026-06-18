@@ -24,26 +24,34 @@ import os
 import sys
 from typing import Any
 
+from enum import Enum
+
 from ._http import _NocoDBHttp
-from .config_params import ConfigType
+from .config_params import ConfigCategory, ConfigScope, ConfigType
 from .schema import ConfigParamColumns, Tables
 
 _C = ConfigParamColumns
 
 
+def _single_select(title: str, enum: type[Enum]) -> dict[str, Any]:
+    return {"title": title, "uidt": "SingleSelect",
+            "colOptions": {"options": [{"title": m.value} for m in enum]}}
+
+
 def _config_params_columns() -> list[dict[str, Any]]:
-    """The `config_params` column spec (NocoDB v2 meta `uidt`s). `type` is a SingleSelect
-    over :class:`ConfigType`; the rest are text/long-text. rig/service LTARs are added with
-    the nested tables."""
+    """The `config_params` column spec (NocoDB v2 meta `uidt`s). `type`/`scope`/`category`
+    are SingleSelects over their enums (constrained → cockpit dropdowns + integrity); the
+    rest are text/long-text. `min`/`max` are raw text — bounds share the param's type and are
+    coerced per `type` like `value` (storage stays raw). rig/service LTARs are added with the
+    nested tables."""
     text = lambda title: {"title": title, "uidt": "SingleLineText"}      # noqa: E731
     longtext = lambda title: {"title": title, "uidt": "LongText"}        # noqa: E731
     return [
         text(_C.CODE),
         longtext(_C.VALUE),
-        {"title": _C.TYPE, "uidt": "SingleSelect",
-         "colOptions": {"options": [{"title": t.value} for t in ConfigType]}},
-        text(_C.SCOPE),
-        text(_C.CATEGORY),
+        _single_select(_C.TYPE, ConfigType),
+        _single_select(_C.SCOPE, ConfigScope),
+        _single_select(_C.CATEGORY, ConfigCategory),
         longtext(_C.DESCRIPTION),
         longtext(_C.OPTIONS),
         text(_C.MIN),

@@ -4,11 +4,16 @@ These exercise the provisioner *logic* against the fake (create-when-absent, no-
 add-missing when present). The real NocoDB v2 meta-API payloads need live validation —
 see provision.py's module docstring.
 """
-from pred_fab_nocodb.config_params import ConfigType
+from pred_fab_nocodb.config_params import ConfigCategory, ConfigScope, ConfigType
 from pred_fab_nocodb.provision import _config_params_columns, ensure_config_params
 from pred_fab_nocodb.schema import ConfigParamColumns, Tables
 
 _EXPECTED_COLS = {c["title"] for c in _config_params_columns()}
+
+
+def _col(fake_http, title):
+    return next(c for c in fake_http.meta_get_table(Tables.CONFIG_PARAMS)["columns"]
+                if c["title"] == title)
 
 
 def test_creates_table_when_absent(fake_http):
@@ -17,11 +22,15 @@ def test_creates_table_when_absent(fake_http):
     # Table now exists with the full column set.
     cols = {c["title"] for c in fake_http.meta_get_table(Tables.CONFIG_PARAMS)["columns"]}
     assert cols == _EXPECTED_COLS
-    # `type` is a SingleSelect over the ConfigType values.
-    type_col = next(c for c in fake_http.meta_get_table(Tables.CONFIG_PARAMS)["columns"]
-                    if c["title"] == ConfigParamColumns.TYPE)
-    assert type_col["uidt"] == "SingleSelect"
-    assert {o["title"] for o in type_col["colOptions"]["options"]} == {t.value for t in ConfigType}
+    # type / scope / category are SingleSelects over their enums.
+    for title, enum in [(ConfigParamColumns.TYPE, ConfigType),
+                        (ConfigParamColumns.SCOPE, ConfigScope),
+                        (ConfigParamColumns.CATEGORY, ConfigCategory)]:
+        col = _col(fake_http, title)
+        assert col["uidt"] == "SingleSelect"
+        assert {o["title"] for o in col["colOptions"]["options"]} == {m.value for m in enum}
+    # min / max stay raw text (coerced per type by the consumer).
+    assert _col(fake_http, ConfigParamColumns.MIN)["uidt"] == "SingleLineText"
 
 
 def test_idempotent_when_present(fake_http):

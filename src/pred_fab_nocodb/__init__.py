@@ -1,7 +1,13 @@
 """pred-fab-nocodb — NocoDB binding for the pred-fab data model."""
 from ._values import ValueRow, ValueWriteItem
 from .client import NocoDBClient
-from .config_params import ConfigParam, ConfigType, coerce_value
+from .config_params import (
+    ConfigCategory,
+    ConfigParam,
+    ConfigScope,
+    ConfigType,
+    coerce_value,
+)
 from .datasets import Dataset
 from .dim_positions import DimPosition
 from .errors import (
@@ -36,6 +42,8 @@ __all__ = [
     "ParameterUpdateEvent",
     "ConfigParam",
     "ConfigType",
+    "ConfigScope",
+    "ConfigCategory",
     "coerce_value",
     "Status",
     "Strategy",
