@@ -51,6 +51,19 @@ def test_get_by_code_missing_raises(fake_http):
         _client(fake_http).get_by_code("nope")
 
 
+def test_full_row_with_category_bounds_and_list(fake_http):
+    c = _client(fake_http)
+    c.upsert(code="tool_offset", value=12.5, value_type=ConfigType.REAL,
+             scope="per_rig", category="hardware", description="nozzle Z offset",
+             min=0.0, max=50.0)
+    c.upsert(code="cam_pairs", value=[[0, 1], [2, 3]], value_type=ConfigType.LIST,
+             category="services")
+    p = c.get_by_code("tool_offset")
+    assert p.scope == "per_rig" and p.category == "hardware"
+    assert p.min == "0.0" and p.max == "50.0"
+    assert c.get_by_code("cam_pairs").coerced == [[0, 1], [2, 3]]   # LIST round-trips via JSON
+
+
 # ===== value-preserving upsert (the core contract) =====
 
 def test_reupsert_preserves_runtime_value_refreshes_structure(fake_http):

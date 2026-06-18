@@ -89,10 +89,15 @@ class ConfigParamColumns:
     ID = "Id"
     CODE = "code"
     VALUE = "value"            # text — the runtime value (coerced per TYPE by the consumer)
-    TYPE = "type"              # SingleSelect — real / int / bool / categorical (coercion authority)
-    SCOPE = "scope"            # text — where the param applies (process / per-rig / service / ...)
+    TYPE = "type"              # SingleSelect — real / int / bool / categorical / list (coercion authority)
+    SCOPE = "scope"            # text — knob / constant / per_rig (editability/nature)
+    CATEGORY = "category"      # text — experiment / process / hardware / services (the cockpit tabs)
     DESCRIPTION = "description"  # text
     OPTIONS = "options"        # LongText (JSON) — allowed values for categoricals (nullable)
+    MIN = "min"                # text — sanity lower bound (rtde's gate-feeding safety params); nullable
+    MAX = "max"                # text — sanity upper bound; nullable
+    # rig / service LTAR links (per-rig + per-service params) land with the `rigs` / `services`
+    # tables — pending rtde's config/*.yaml (rig cardinality, per-service param sets).
 
 
 class DimPositionColumns:

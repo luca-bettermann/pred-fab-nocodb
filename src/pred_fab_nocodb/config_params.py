@@ -27,6 +27,7 @@ class ConfigType(str, Enum):
     INT = "int"
     BOOL = "bool"
     CATEGORICAL = "categorical"
+    LIST = "list"
 
 
 _TRUE = {"true", "1", "yes", "on"}
@@ -55,6 +56,13 @@ def coerce_value(raw: Any, value_type: ConfigType) -> Any:
         if s in _FALSE:
             return False
         raise ValidationError(f"config value {raw!r} is not a valid bool")
+    if value_type is ConfigType.LIST:
+        if isinstance(raw, list):
+            return raw
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            raise ValidationError(f"config value {raw!r} is not a JSON list")
+        return parsed
     return str(raw)  # CATEGORICAL
 
 
@@ -67,8 +75,11 @@ class ConfigParam:
     value: str
     type: ConfigType
     scope: Optional[str] = None
+    category: Optional[str] = None
     description: Optional[str] = None
     options: list[str] = field(default_factory=list)
+    min: Optional[str] = None
+    max: Optional[str] = None
 
     @property
     def coerced(self) -> Any:
@@ -103,22 +114,29 @@ class ConfigParamsClient(_BaseTableClient):
         value: Any,
         value_type: ConfigType,
         scope: Optional[str] = None,
+        category: Optional[str] = None,
         description: Optional[str] = None,
         options: Optional[list[str]] = None,
+        min: Any = None,
+        max: Any = None,
     ) -> ConfigParam:
         """Create or update a config row, keyed by ``code``.
 
         **Value-preserving:** on a row that already exists, refresh the structural metadata
-        (``type``/``scope``/``description``/``options``) but **never overwrite the stored
-        ``value``** — NocoDB is the runtime SSOT for values, the repo seed only for structure.
-        ``value`` is written only on first creation (the seed default).
+        (``type``/``scope``/``category``/``description``/``options``/``min``/``max``) but
+        **never overwrite the stored ``value``** — NocoDB is the runtime SSOT for values, the
+        repo seed only for structure. ``value`` is written only on first creation (the seed
+        default).
         """
         structure: dict[str, Any] = {
             ConfigParamColumns.CODE: code,
             ConfigParamColumns.TYPE: ConfigType(value_type).value,
             ConfigParamColumns.SCOPE: scope,
+            ConfigParamColumns.CATEGORY: category,
             ConfigParamColumns.DESCRIPTION: description,
             ConfigParamColumns.OPTIONS: json.dumps(list(options)) if options is not None else None,
+            ConfigParamColumns.MIN: None if min is None else _to_text(min),
+            ConfigParamColumns.MAX: None if max is None else _to_text(max),
         }
         try:
             existing: Optional[ConfigParam] = self.get_by_code(code)
@@ -141,6 +159,8 @@ def _to_text(value: Any) -> str:
     """Serialize a seed default to the text column (catalog stores values as text)."""
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, (list, dict)):
+        return json.dumps(value)
     return str(value)
 
 
@@ -159,6 +179,9 @@ def _row_to_param(row: dict[str, Any]) -> ConfigParam:
         value=str(row.get(ConfigParamColumns.VALUE, "")),
         type=ConfigType(str(row[ConfigParamColumns.TYPE])),
         scope=row.get(ConfigParamColumns.SCOPE) or None,
+        category=row.get(ConfigParamColumns.CATEGORY) or None,
         description=row.get(ConfigParamColumns.DESCRIPTION) or None,
         options=[str(o) for o in options],
+        min=row.get(ConfigParamColumns.MIN) or None,
+        max=row.get(ConfigParamColumns.MAX) or None,
     )
