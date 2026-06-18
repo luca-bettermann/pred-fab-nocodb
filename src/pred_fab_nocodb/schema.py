@@ -16,6 +16,7 @@ class Tables:
     DATASETS = "datasets"
     EXPERIMENT_SETS = "experiment_sets"   # named groups — supersedes `datasets` (optional until provisioned)
     DIM_POSITIONS = "dim_positions"
+    CONFIG_PARAMS = "config_params"       # single-SSOT config catalog (optional until provisioned)
     SET_STUDY_CONSTANTS = "set_study_constants"
     SET_EXP_PARAMS = "set_exp_params"
     SET_EXP_FEATURES = "set_exp_features"
@@ -74,6 +75,24 @@ class ExperimentSetColumns:
     ORDERED = "ordered"        # Checkbox — sequential vs batch
     MEMBERS = "members"        # LongText (JSON) — experiment codes, in order
     # Generation (source method, κ) is per-experiment provenance, not a set field.
+
+
+class ConfigParamColumns:
+    """Columns on the `config_params` table — the single-SSOT config catalog.
+
+    One row per config definition, keyed by ``CODE``. ``VALUE`` is the runtime SSOT
+    (value-preserving upsert never clobbers it); the remaining columns are the
+    *structure* (refreshed from the repo seed on stack-up). ``TYPE`` is the coercion
+    authority for ``VALUE`` (stored as text); ``OPTIONS`` is a JSON list.
+    """
+
+    ID = "Id"
+    CODE = "code"
+    VALUE = "value"            # text — the runtime value (coerced per TYPE by the consumer)
+    TYPE = "type"              # SingleSelect — real / int / bool / categorical (coercion authority)
+    SCOPE = "scope"            # text — where the param applies (process / per-rig / service / ...)
+    DESCRIPTION = "description"  # text
+    OPTIONS = "options"        # LongText (JSON) — allowed values for categoricals (nullable)
 
 
 class DimPositionColumns:

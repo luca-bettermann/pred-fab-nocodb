@@ -52,6 +52,7 @@ at construction), so that back-edge is intentionally allowed.
 | `src/pred_fab_nocodb/experiments.py` | `ExperimentsClient` + `Experiment` dataclass |
 | `src/pred_fab_nocodb/datasets.py` | `DatasetsClient` + `Dataset` dataclass |
 | `src/pred_fab_nocodb/experiment_sets.py` | `ExperimentSetsClient` + `ExperimentSet` dataclass — named groups (members as JSON, link-free); supersedes `datasets` |
+| `src/pred_fab_nocodb/config_params.py` | `ConfigParamsClient` + `ConfigParam`/`ConfigType` + `coerce_value` — the single-SSOT config catalog (value-preserving upsert; type-driven coercion) |
 | `src/pred_fab_nocodb/_rows.py` | Shared row-field parsers (`_resolve_link_id` / `_resolve_link_code` / `_parse_dt`) — internal |
 | `src/pred_fab_nocodb/dim_positions.py` | `DimPositionsClient` + `DimPosition` dataclass |
 | `src/pred_fab_nocodb/study_constants.py` | `StudyConstantsClient` |

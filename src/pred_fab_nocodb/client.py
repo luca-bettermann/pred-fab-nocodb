@@ -8,6 +8,7 @@ from ._values import ValueClient
 from .datasets import DatasetsClient
 from .dim_positions import DimPositionsClient
 from .errors import NocoDBError, ValidationError
+from .config_params import ConfigParamsClient
 from .experiment_sets import ExperimentSetsClient
 from .experiments import ExperimentsClient
 from .schema import (
@@ -124,6 +125,10 @@ class NocoDBClient:
         _es_id = _all_ids.get(Tables.EXPERIMENT_SETS)
         self.experiment_sets: ExperimentSetsClient | None = (
             ExperimentSetsClient(self._http, base_id, _es_id) if _es_id else None
+        )
+        _cp_id = _all_ids.get(Tables.CONFIG_PARAMS)
+        self.config_params: ConfigParamsClient | None = (
+            ConfigParamsClient(self._http, base_id, _cp_id) if _cp_id else None
         )
 
         # Value clients — share `dim_positions` so the cache benefits all writes
