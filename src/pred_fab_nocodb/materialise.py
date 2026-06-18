@@ -24,7 +24,7 @@ the others can link them:
                     "scope": "knob", "options": [...], "min": ..., "max": ..., "unit": "...",
                     "service": "service-name"}]}
 
-Env: ``NOCODB_URL``, ``NOCODB_API_TOKEN``, ``NOCODB_BASE_ID``. Exit 0 on success, 2 if the
+Env: ``NOCODB_URL``, ``NOCODB_API_TOKEN``, ``NOCODB_ROBOLAB_BASE_ID``. Exit 0 on success, 2 if the
 catalog tables aren't provisioned in the base (row materialiser, not a table-creator — run
 :mod:`provision` first).
 """
@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         url = os.environ["NOCODB_URL"]
         token = os.environ["NOCODB_API_TOKEN"]
-        base_id = os.environ["NOCODB_BASE_ID"]
+        base_id = os.environ["NOCODB_ROBOLAB_BASE_ID"]
     except KeyError as missing:
         print(f"materialise: missing env var {missing}", file=sys.stderr)
         return 2

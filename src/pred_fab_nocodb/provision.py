@@ -5,7 +5,7 @@ materialise upserts the *rows*. data-stack's stack-up hook runs ``provision → 
 export) → materialise`` after NocoDB is healthy, so a fresh box self-provisions on
 ``docker compose up``.
 
-CLI::  python -m pred_fab_nocodb.provision     (env: NOCODB_URL / NOCODB_API_TOKEN / NOCODB_BASE_ID)
+CLI::  python -m pred_fab_nocodb.provision  (env: NOCODB_URL / NOCODB_API_TOKEN / NOCODB_ROBOLAB_BASE_ID)
 
 Two passes, both idempotent and safe to re-run every ``up``:
   1. **tables + scalar columns** — create each catalog table if absent, else add only its
@@ -156,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         url = os.environ["NOCODB_URL"]
         token = os.environ["NOCODB_API_TOKEN"]
-        base_id = os.environ["NOCODB_BASE_ID"]
+        base_id = os.environ["NOCODB_ROBOLAB_BASE_ID"]
     except KeyError as missing:
         print(f"provision: missing env var {missing}", file=sys.stderr)
         return 2
