@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from ._base import _BaseTableClient
-from ._rows import _parse_dt, _resolve_link_code, _resolve_link_id
+from ._rows import _parse_dt, _parse_json_dict, _resolve_link_code, _resolve_link_id
 from .errors import NotFoundError
 from .schema import ExperimentColumns, Status
 
@@ -197,21 +197,7 @@ def _row_to_experiment(row: dict[str, Any]) -> Experiment:
         ended_at=_parse_dt(row.get(ExperimentColumns.ENDED_AT)),
         notes=row.get(ExperimentColumns.NOTES),
         design=row.get(ExperimentColumns.DESIGN) or None,
-        provenance=_parse_provenance(row.get(ExperimentColumns.PROVENANCE)),
+        provenance=_parse_json_dict(row.get(ExperimentColumns.PROVENANCE)),
     )
-
-
-def _parse_provenance(value: Any) -> Optional[dict[str, Any]]:
-    """Deserialize the ``provenance`` LongText (JSON) column to a dict; None if blank
-    or unparseable (already a dict passes through, for response-shape robustness)."""
-    if value is None or value == "":
-        return None
-    if isinstance(value, dict):
-        return value
-    try:
-        parsed = json.loads(value)
-        return parsed if isinstance(parsed, dict) else None
-    except (json.JSONDecodeError, TypeError):
-        return None
 
 

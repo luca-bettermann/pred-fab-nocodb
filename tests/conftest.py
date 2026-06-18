@@ -28,6 +28,8 @@ class FakeNocoDBHttp:
         self._links: dict[tuple[str, str, int], list[int]] = {}
         # Map (table_id, link_field_id) -> column name to mirror onto the row
         self._link_field_to_column: dict[tuple[str, str], str] = {}
+        # Map (table_id, link_field_id) -> related table id (so links resolve within it)
+        self._link_field_related: dict[tuple[str, str], str] = {}
 
     # ─── Test setup helpers ───────────────────────────────────────────
 
@@ -160,13 +162,30 @@ class FakeNocoDBHttp:
         self.calls.append(("meta_create_table", base_id, None, body))
         title = body["title"]
         self._tables.setdefault(title, [])          # so it appears in meta_list_tables
-        self._columns[title] = list(body.get("columns", []))
+        self._columns[title] = [self._register_column(title, c) for c in body.get("columns", [])]
         return {"id": title, "title": title, "columns": self._columns[title]}
 
     def meta_create_column(self, table_id: str, body: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("meta_create_column", table_id, None, body))
-        self._columns.setdefault(table_id, []).append(body)
-        return body
+        col = self._register_column(table_id, body)
+        self._columns.setdefault(table_id, []).append(col)
+        return col
+
+    def _register_column(self, table_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Assign a synthetic column id; for LTAR cols, mirror NocoDB's `colOptions`
+        (so `_resolve_link_field_ids` finds the field) + register the link→column map
+        (so a later `link_records` reflects onto the row, as real NocoDB does)."""
+        col = dict(body)
+        col_id = f"{table_id}::{col['title']}"
+        col["id"] = col_id
+        if col.get("uidt") == "LinkToAnotherRecord":
+            related = col.get("childId", "")
+            opts = dict(col.get("colOptions") or {})
+            opts.setdefault("fk_related_model_id", related)
+            col["colOptions"] = opts
+            self._link_field_to_column[(table_id, col_id)] = col["title"]
+            self._link_field_related[(table_id, col_id)] = related
+        return col
 
     # ─── Links API ────────────────────────────────────────────────────
 
@@ -193,7 +212,8 @@ class FakeNocoDBHttp:
         # NocoDB v2 LTAR shape) so reads + filters work correctly.
         column_name = self._link_field_to_column.get((table_id, link_field_id))
         if column_name is not None:
-            shaped: list[dict[str, Any]] = [self._shape_link(i) for i in ids]
+            related = self._link_field_related.get((table_id, link_field_id))
+            shaped: list[dict[str, Any]] = [self._shape_link(i, related) for i in ids]
             for row in self._tables.get(table_id, []):
                 if int(row.get("Id", -1)) == record_id:
                     row[column_name] = (
@@ -201,16 +221,22 @@ class FakeNocoDBHttp:
                     )
                     break
 
-    def _shape_link(self, linked_id: int) -> dict[str, Any]:
-        """Produce the `{Id, code}` LTAR shape by scanning all tables for a
-        row with this Id. Falls back to `{Id}` only if no match found."""
-        for rows in self._tables.values():
+    def _shape_link(self, linked_id: int, related_table: str | None = None) -> dict[str, Any]:
+        """Produce the LTAR display shape (``{Id, <display fields>}``) for a linked record.
+
+        Scans ``related_table`` when known (record ids are per-table, so a global scan can
+        hit a same-id row in the wrong table), else every table. Includes whichever
+        primary-value field the related table uses (`code` / `name` / `role`)."""
+        scope = ([self._tables[related_table]] if related_table in self._tables
+                 else list(self._tables.values()))
+        for rows in scope:
             for row in rows:
                 if int(row.get("Id", -1)) == linked_id:
-                    code = row.get("code")
-                    if code is not None:
-                        return {"Id": linked_id, "code": str(code)}
-                    return {"Id": linked_id}
+                    shaped: dict[str, Any] = {"Id": linked_id}
+                    for key in ("code", "name", "role"):
+                        if row.get(key) is not None:
+                            shaped[key] = str(row[key])
+                    return shaped
         return {"Id": linked_id}
 
     def set_link_field(self, table_id: str, link_field_id: str, column_name: str) -> None:

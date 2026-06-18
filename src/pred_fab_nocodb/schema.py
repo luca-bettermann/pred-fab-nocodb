@@ -16,11 +16,16 @@ class Tables:
     DATASETS = "datasets"
     EXPERIMENT_SETS = "experiment_sets"   # named groups — supersedes `datasets` (optional until provisioned)
     DIM_POSITIONS = "dim_positions"
-    CONFIG_PARAMS = "config_params"       # single-SSOT config catalog (optional until provisioned)
     SET_STUDY_CONSTANTS = "set_study_constants"
     SET_EXP_PARAMS = "set_exp_params"
     SET_EXP_FEATURES = "set_exp_features"
     SET_EXP_ATTRIBUTES = "set_exp_attributes"
+
+    # robolab config catalog — the relational lab-config SSOT (optional until provisioned).
+    PARAMS = "params"           # tunable-leaf definitions (the config catalog)
+    SERVICES = "services"       # capabilities; self-`Requires` dependency graph
+    USE_CASES = "use_cases"     # named bundles of services
+    UNITS = "units"             # per-rig hardware (printer / scanner …)
 
 
 class StudyColumns:
@@ -78,26 +83,61 @@ class ExperimentSetColumns:
 
 
 class ConfigParamColumns:
-    """Columns on the `config_params` table — the single-SSOT config catalog.
+    """Columns on the `params` config catalog — one row per tunable-leaf *definition*.
 
-    One row per config definition, keyed by ``CODE``. ``VALUE`` is the runtime SSOT
-    (value-preserving upsert never clobbers it); the remaining columns are the
-    *structure* (refreshed from the repo seed on stack-up). ``TYPE`` is the coercion
-    authority for ``VALUE`` (stored as text); ``OPTIONS`` is a JSON list.
+    Keyed by ``CODE`` (distinct from `set_exp_params`, which holds per-experiment param
+    *values*: this is the catalog of definitions). ``VALUE`` is the runtime SSOT seed
+    default (value-preserving upsert never clobbers it). ``TYPE`` is the coercion authority
+    for ``VALUE`` (stored as text — a value may be categorical); ``MIN``/``MAX`` are numeric
+    safety bounds (Number columns). ``SERVICE`` links the service a service-param configures.
     """
 
     ID = "Id"
-    CODE = "code"
-    VALUE = "value"            # text — the runtime value (coerced per TYPE by the consumer)
-    TYPE = "type"              # SingleSelect — real / int / bool / categorical / list (coercion authority)
-    SCOPE = "scope"            # text — knob / constant / per_rig (editability/nature)
-    CATEGORY = "category"      # text — experiment / process / hardware / services (the cockpit tabs)
-    DESCRIPTION = "description"  # text
+    CODE = "code"              # unique definition key
+    LABEL = "label"            # human display name
+    TYPE = "type"              # SingleSelect — real/int/bool/categorical/vector/list (coercion authority)
+    SCOPE = "scope"            # SingleSelect — knob/editable/constant/safety (editability/nature)
+    VALUE = "value"            # text — the seed-default runtime value (coerced per TYPE by the consumer)
     OPTIONS = "options"        # LongText (JSON) — allowed values for categoricals (nullable)
-    MIN = "min"                # text — sanity lower bound (rtde's gate-feeding safety params); nullable
-    MAX = "max"                # text — sanity upper bound; nullable
-    # rig / service LTAR links (per-rig + per-service params) land with the `rigs` / `services`
-    # tables — pending rtde's config/*.yaml (rig cardinality, per-service param sets).
+    MIN = "min"                # Number — sanity lower bound (rtde's gate-feeding safety params); nullable
+    MAX = "max"                # Number — sanity upper bound; nullable
+    UNIT = "unit"              # text — physical unit (nullable)
+    DESCRIPTION = "description"  # text
+    SERVICE = "service"        # LinkToAnotherRecord -> services (nullable; set for service params)
+
+
+class ServiceColumns:
+    """Columns on the `services` table — lab capabilities + their dependency graph."""
+
+    ID = "Id"
+    NAME = "name"              # unique service identity
+    ENABLED = "enabled"        # Checkbox
+    KIND = "kind"              # text — service category (e.g. sensor / actuator)
+    REQUIRES = "requires"      # LinkToAnotherRecord -> services (SELF m2m — dependencies)
+    DASHBOARD = "dashboard"    # LongText (JSON) — dashboard config
+
+
+class UseCaseColumns:
+    """Columns on the `use_cases` table — named bundles of services."""
+
+    ID = "Id"
+    NAME = "name"              # unique use-case identity
+    DESCRIPTION = "description"
+    SERVICES = "services"      # LinkToAnotherRecord -> services (m2m)
+
+
+class UnitColumns:
+    """Columns on the `units` table — this rig's hardware units (one row per unit).
+
+    Per-rig hardware param *values* (home_joints, tool_offset, …) live in `params`, not
+    here; a unit row is the hardware identity + its sensors. ``ROLE`` is the unit key.
+    """
+
+    ID = "Id"
+    ROLE = "role"              # unique unit role (e.g. printer / scanner)
+    ROBOT = "robot"            # text — robot model/identity
+    TOOL = "tool"              # text — mounted tool
+    SENSORS = "sensors"        # LinkToAnotherRecord -> services (the unit's sensor services)
 
 
 class DimPositionColumns:
@@ -186,3 +226,28 @@ class Purpose(StrEnum):
     TRAIN = "train"
     VALIDATION = "validation"
     TEST = "test"
+
+
+class ConfigType(StrEnum):
+    """Declared type of a `params` value — the coercion authority for the text-stored value.
+
+    A SingleSelect column on `params`; the one place raw → typed coercion is driven from
+    (see `config_params.coerce_value`)."""
+
+    REAL = "real"
+    INT = "int"
+    BOOL = "bool"
+    CATEGORICAL = "categorical"
+    VECTOR = "vector"
+    LIST = "list"
+
+
+class ConfigScope(StrEnum):
+    """A `params` definition's editability/nature — a SingleSelect column.
+
+    Per-rig hardware is the `units` table, not a scope value."""
+
+    KNOB = "knob"            # tunable per experiment
+    EDITABLE = "editable"    # user-editable default
+    CONSTANT = "constant"    # read-only
+    SAFETY = "safety"        # safety bound (gate-feeding)

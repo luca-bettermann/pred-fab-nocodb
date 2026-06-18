@@ -18,8 +18,11 @@ from .schema import (
     Tables,
 )
 from .schema_validator import SchemaValidator
+from .services import ServicesClient
 from .studies import StudiesClient
 from .study_constants import StudyConstantsClient
+from .units import UnitsClient
+from .use_cases import UseCasesClient
 from .workflows import WorkflowsClient
 
 # Tables we expect to find in the NocoDB workspace at construction time.
@@ -119,16 +122,41 @@ class NocoDBClient:
             link_field_ids=_links(Tables.SET_STUDY_CONSTANTS),
         )
 
-        # Optional table — provisioned during the ExperimentSet rollout; ``None`` on bases
-        # that don't have it yet (so this is non-breaking until the table exists).
+        # Optional tables — provisioned during their respective rollouts; ``None`` on bases
+        # that don't have them yet (non-breaking until the table exists).
         _all_ids = {t.get("title", ""): t.get("id", "") for t in self._http.meta_list_tables(base_id)}
         _es_id = _all_ids.get(Tables.EXPERIMENT_SETS)
         self.experiment_sets: ExperimentSetsClient | None = (
             ExperimentSetsClient(self._http, base_id, _es_id) if _es_id else None
         )
-        _cp_id = _all_ids.get(Tables.CONFIG_PARAMS)
+
+        # robolab config catalog (params/services/use_cases/units) — LTAR-linked, so resolve
+        # their link-field ids over the subset that exists in this base.
+        _cat_ids = {
+            t: _all_ids[t] for t in
+            (Tables.PARAMS, Tables.SERVICES, Tables.USE_CASES, Tables.UNITS)
+            if _all_ids.get(t)
+        }
+        _cat_links, _ = _resolve_link_field_ids(self._http, _cat_ids) if _cat_ids else ({}, {})
         self.config_params: ConfigParamsClient | None = (
-            ConfigParamsClient(self._http, base_id, _cp_id) if _cp_id else None
+            ConfigParamsClient(self._http, base_id, _cat_ids[Tables.PARAMS],
+                               link_field_ids=_cat_links.get(Tables.PARAMS, {}))
+            if Tables.PARAMS in _cat_ids else None
+        )
+        self.services: ServicesClient | None = (
+            ServicesClient(self._http, base_id, _cat_ids[Tables.SERVICES],
+                           link_field_ids=_cat_links.get(Tables.SERVICES, {}))
+            if Tables.SERVICES in _cat_ids else None
+        )
+        self.use_cases: UseCasesClient | None = (
+            UseCasesClient(self._http, base_id, _cat_ids[Tables.USE_CASES],
+                           link_field_ids=_cat_links.get(Tables.USE_CASES, {}))
+            if Tables.USE_CASES in _cat_ids else None
+        )
+        self.units: UnitsClient | None = (
+            UnitsClient(self._http, base_id, _cat_ids[Tables.UNITS],
+                        link_field_ids=_cat_links.get(Tables.UNITS, {}))
+            if Tables.UNITS in _cat_ids else None
         )
 
         # Value clients — share `dim_positions` so the cache benefits all writes

@@ -1,4 +1,4 @@
-"""Tests for ConfigParamsClient (the single-SSOT config catalog) + coerce_value."""
+"""Tests for ConfigParamsClient (the relational `params` catalog) + coerce_value."""
 import json
 
 import pytest
@@ -13,7 +13,7 @@ from pred_fab_nocodb.schema import ConfigParamColumns
 
 
 def _client(fake_http):
-    return ConfigParamsClient(fake_http, base_id="b1", table_id="config_params")
+    return ConfigParamsClient(fake_http, base_id="b1", table_id="params")
 
 
 # ===== upsert round-trip =====
@@ -21,10 +21,12 @@ def _client(fake_http):
 def test_upsert_round_trips_a_param(fake_http):
     c = _client(fake_http)
     c.upsert(code="fab_speed", value=0.05, value_type=ConfigType.REAL,
-             scope="process", description="extrusion speed")
+             label="Fabrication speed", scope="knob", unit="m/s",
+             description="extrusion speed")
     p = c.get_by_code("fab_speed")
     assert p.value == "0.05" and p.type is ConfigType.REAL
-    assert p.scope == "process" and p.description == "extrusion speed"
+    assert p.label == "Fabrication speed" and p.scope == "knob" and p.unit == "m/s"
+    assert p.description == "extrusion speed"
     assert p.coerced == pytest.approx(0.05)
 
 
@@ -32,7 +34,7 @@ def test_categorical_options_stored_as_json(fake_http):
     c = _client(fake_http)
     c.upsert(code="mode", value="clay", value_type=ConfigType.CATEGORICAL,
              options=["clay", "concrete"])
-    row = next(r for r in fake_http.get_records("config_params") if r.get("code") == "mode")
+    row = next(r for r in fake_http.get_records("params") if r.get("code") == "mode")
     assert json.loads(row[ConfigParamColumns.OPTIONS]) == ["clay", "concrete"]
     assert c.get_by_code("mode").options == ["clay", "concrete"]
 
@@ -51,24 +53,24 @@ def test_get_by_code_missing_raises(fake_http):
         _client(fake_http).get_by_code("nope")
 
 
-def test_full_row_with_category_bounds_and_list(fake_http):
+def test_numeric_bounds_and_vector(fake_http):
     c = _client(fake_http)
     c.upsert(code="tool_offset", value=12.5, value_type=ConfigType.REAL,
-             scope="per_rig", category="hardware", description="nozzle Z offset",
+             scope="safety", unit="mm", description="nozzle Z offset",
              min=0.0, max=50.0)
-    c.upsert(code="cam_pairs", value=[[0, 1], [2, 3]], value_type=ConfigType.LIST,
-             category="services")
+    c.upsert(code="home_joints", value=[0, -90, 90, 0, 90, 0], value_type=ConfigType.VECTOR)
     p = c.get_by_code("tool_offset")
-    assert p.scope == "per_rig" and p.category == "hardware"
-    assert p.min == "0.0" and p.max == "50.0"
-    assert p.coerced_min == pytest.approx(0.0) and p.coerced_max == pytest.approx(50.0)  # coerced per type
-    assert c.get_by_code("cam_pairs").coerced == [[0, 1], [2, 3]]   # LIST round-trips via JSON
+    assert p.scope == "safety" and p.unit == "mm"
+    assert p.min == pytest.approx(0.0) and p.max == pytest.approx(50.0)  # numeric Number column
+    assert p.coerced_min == pytest.approx(0.0) and p.coerced_max == pytest.approx(50.0)
+    assert c.get_by_code("home_joints").coerced == [0.0, -90.0, 90.0, 0.0, 90.0, 0.0]
 
 
 def test_coerced_bounds_none_when_unset(fake_http):
     c = _client(fake_http)
     c.upsert(code="freeform", value="x", value_type=ConfigType.CATEGORICAL)
     p = c.get_by_code("freeform")
+    assert p.min is None and p.max is None
     assert p.coerced_min is None and p.coerced_max is None
 
 
@@ -80,17 +82,17 @@ def test_reupsert_preserves_runtime_value_refreshes_structure(fake_http):
     c.upsert(code="fab_speed", value=0.05, value_type=ConfigType.REAL, description="seed")
 
     # Simulate a runtime edit of the value in NocoDB.
-    row = next(r for r in fake_http.get_records("config_params") if r.get("code") == "fab_speed")
-    fake_http.records_update("config_params", {ConfigParamColumns.ID: row["Id"],
-                                               ConfigParamColumns.VALUE: "0.09"})
+    row = next(r for r in fake_http.get_records("params") if r.get("code") == "fab_speed")
+    fake_http.records_update("params", {ConfigParamColumns.ID: row["Id"],
+                                        ConfigParamColumns.VALUE: "0.09"})
 
-    # Re-seed from the repo (different default value + updated structure).
+    # Re-seed from the repo (same default value + updated structure).
     c.upsert(code="fab_speed", value=0.05, value_type=ConfigType.REAL, description="updated desc")
 
     p = c.get_by_code("fab_speed")
     assert p.value == "0.09"               # runtime value preserved, NOT reset to the seed default
     assert p.description == "updated desc"  # structure refreshed
-    assert len(fake_http.get_records("config_params")) == 1   # updated in place, not duplicated
+    assert len(fake_http.get_records("params")) == 1   # updated in place, not duplicated
 
 
 def test_first_upsert_writes_the_seed_default(fake_http):
@@ -107,6 +109,8 @@ def test_coerce_value_by_type():
     assert coerce_value("clay", ConfigType.CATEGORICAL) == "clay"
     assert coerce_value("true", ConfigType.BOOL) is True
     assert coerce_value("0", ConfigType.BOOL) is False
+    assert coerce_value("[1, 2, 3]", ConfigType.VECTOR) == [1.0, 2.0, 3.0]
+    assert coerce_value('["a", "b"]', ConfigType.LIST) == ["a", "b"]
     assert coerce_value(None, ConfigType.REAL) is None
 
 

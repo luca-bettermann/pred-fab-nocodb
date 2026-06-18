@@ -2,7 +2,6 @@
 from ._values import ValueRow, ValueWriteItem
 from .client import NocoDBClient
 from .config_params import (
-    ConfigCategory,
     ConfigParam,
     ConfigScope,
     ConfigType,
@@ -21,7 +20,10 @@ from .events import ParameterUpdateEvent
 from .experiments import Experiment
 from .schema import Purpose, Status, Strategy
 from .schema_validator import SchemaValidator
+from .services import Service
 from .studies import Study
+from .units import Unit
+from .use_cases import UseCase
 from .workflows import (
     ExperimentBundle,
     ExperimentPlan,
@@ -43,8 +45,10 @@ __all__ = [
     "ConfigParam",
     "ConfigType",
     "ConfigScope",
-    "ConfigCategory",
     "coerce_value",
+    "Service",
+    "UseCase",
+    "Unit",
     "Status",
     "Strategy",
     "Purpose",

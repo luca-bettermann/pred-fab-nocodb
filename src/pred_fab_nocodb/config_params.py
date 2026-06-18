@@ -1,52 +1,26 @@
-"""Config-params table client — the single-SSOT config catalog.
+"""`params` config-catalog client — the relational config SSOT (tunable-leaf definitions).
 
-One row per config definition, keyed by ``code``. ``value`` is the **runtime SSOT**:
-the :meth:`ConfigParamsClient.upsert` is **value-preserving** — re-seeding from the repo
-refreshes the *structure* (type/scope/description/options) but never clobbers a
-runtime-edited value. ``type`` is the coercion authority for the (text-stored) value;
+One row per config *definition*, keyed by ``code`` (distinct from `set_exp_params`, which
+holds per-experiment param *values*). ``value`` is the runtime SSOT seed default:
+:meth:`ConfigParamsClient.upsert` is **value-preserving** — re-seeding from the repo
+refreshes the *structure* (label/type/scope/options/bounds/unit/service) but never clobbers
+a runtime-edited value. ``type`` is the coercion authority for the (text-stored) value;
 :func:`coerce_value` is the one place raw → typed happens, so every consumer (rtde's
-synthesiser, pred-fab) coerces identically. See the KB note *Cockpit hosting + NocoDB —
-implementation plan* (Workstream B).
+synthesiser, pred-fab) coerces identically. See the KB note *Design NocoDB params +
+experiment registry*.
 """
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Optional
 
 from ._base import _BaseTableClient
+from ._rows import _resolve_link_display, _resolve_link_id
 from .errors import NotFoundError, ValidationError
-from .schema import ConfigParamColumns
+from .schema import ConfigParamColumns, ConfigScope, ConfigType, ServiceColumns
 
-
-class ConfigType(str, Enum):
-    """The declared type of a config value — the coercion authority for the text-stored value."""
-
-    REAL = "real"
-    INT = "int"
-    BOOL = "bool"
-    CATEGORICAL = "categorical"
-    LIST = "list"
-
-
-class ConfigScope(str, Enum):
-    """A param's editability/nature (the screenshot groups). Constrained → a SingleSelect
-    column. Screenshot-derived; extend-when-rare if rtde's config carries another value."""
-
-    KNOB = "knob"            # editable per experiment
-    CONSTANT = "constant"    # read-only
-    PER_RIG = "per_rig"      # editable per rig
-
-
-class ConfigCategory(str, Enum):
-    """The cockpit tab a param belongs to. Constrained → a SingleSelect column."""
-
-    EXPERIMENT = "experiment"
-    PROCESS = "process"
-    HARDWARE = "hardware"
-    SERVICES = "services"
-
+__all__ = ["ConfigType", "ConfigScope", "ConfigParam", "ConfigParamsClient", "coerce_value"]
 
 _TRUE = {"true", "1", "yes", "on"}
 _FALSE = {"false", "0", "no", "off"}
@@ -56,9 +30,8 @@ def coerce_value(raw: Any, value_type: ConfigType) -> Any:
     """Coerce a raw (text) catalog value to its declared :class:`ConfigType`.
 
     The single raw→typed authority for config values. Strict: a malformed value for its
-    declared type raises rather than silently degrading (matches the audit's anti-heuristic
-    stance — the catalog declares the type, so coercion is principled, not guessed).
-    """
+    declared type raises rather than silently degrading (the catalog declares the type, so
+    coercion is principled, not guessed)."""
     if raw is None:
         return None
     if value_type is ConfigType.REAL:
@@ -74,30 +47,31 @@ def coerce_value(raw: Any, value_type: ConfigType) -> Any:
         if s in _FALSE:
             return False
         raise ValidationError(f"config value {raw!r} is not a valid bool")
-    if value_type is ConfigType.LIST:
-        if isinstance(raw, list):
-            return raw
-        parsed = json.loads(raw)
+    if value_type in (ConfigType.LIST, ConfigType.VECTOR):
+        parsed = raw if isinstance(raw, list) else json.loads(raw)
         if not isinstance(parsed, list):
             raise ValidationError(f"config value {raw!r} is not a JSON list")
-        return parsed
+        return [float(x) for x in parsed] if value_type is ConfigType.VECTOR else parsed
     return str(raw)  # CATEGORICAL
 
 
 @dataclass(frozen=True)
 class ConfigParam:
-    """One row from the `config_params` catalog."""
+    """One definition row from the `params` config catalog."""
 
     id: int
     code: str
     value: str
     type: ConfigType
+    label: Optional[str] = None
     scope: Optional[str] = None
-    category: Optional[str] = None
     description: Optional[str] = None
     options: list[str] = field(default_factory=list)
-    min: Optional[str] = None
-    max: Optional[str] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    unit: Optional[str] = None
+    service_id: Optional[int] = None
+    service: Optional[str] = None
 
     @property
     def coerced(self) -> Any:
@@ -108,9 +82,8 @@ class ConfigParam:
     def coerced_min(self) -> Any:
         """The lower sanity bound coerced to the param's type (``None`` if unset).
 
-        Bounds share the param's type (a real's bounds are reals); rtde's preflight
-        safety check reads these for the params the collision gate computes with.
-        """
+        rtde's preflight safety check reads these for the params the collision gate
+        computes with; bounds share the param's type (a real's bounds are reals)."""
         return None if self.min is None else coerce_value(self.min, self.type)
 
     @property
@@ -120,7 +93,7 @@ class ConfigParam:
 
 
 class ConfigParamsClient(_BaseTableClient):
-    """Read/write the `config_params` catalog (link-free; value-preserving upsert)."""
+    """Read/write the `params` config catalog (value-preserving upsert; nullable service link)."""
 
     def get_by_code(self, code: str) -> ConfigParam:
         rows = self._http.records_list(
@@ -145,30 +118,33 @@ class ConfigParamsClient(_BaseTableClient):
         code: str,
         value: Any,
         value_type: ConfigType,
+        label: Optional[str] = None,
         scope: Optional[str] = None,
-        category: Optional[str] = None,
         description: Optional[str] = None,
         options: Optional[list[str]] = None,
-        min: Any = None,
-        max: Any = None,
+        min: Optional[float] = None,
+        max: Optional[float] = None,
+        unit: Optional[str] = None,
+        service_id: Optional[int] = None,
     ) -> ConfigParam:
-        """Create or update a config row, keyed by ``code``.
+        """Create or update a definition row, keyed by ``code``.
 
-        **Value-preserving:** on a row that already exists, refresh the structural metadata
-        (``type``/``scope``/``category``/``description``/``options``/``min``/``max``) but
+        **Value-preserving:** on an existing row, refresh the structural metadata
+        (label/type/scope/options/bounds/unit) and re-assert the ``service`` link, but
         **never overwrite the stored ``value``** — NocoDB is the runtime SSOT for values, the
         repo seed only for structure. ``value`` is written only on first creation (the seed
-        default).
-        """
+        default). ``min``/``max`` are numeric bounds; ``service_id`` links the configured
+        service (resolved by the caller)."""
         structure: dict[str, Any] = {
             ConfigParamColumns.CODE: code,
+            ConfigParamColumns.LABEL: label,
             ConfigParamColumns.TYPE: ConfigType(value_type).value,
-            ConfigParamColumns.SCOPE: scope,
-            ConfigParamColumns.CATEGORY: category,
-            ConfigParamColumns.DESCRIPTION: description,
+            ConfigParamColumns.SCOPE: ConfigScope(scope).value if scope is not None else None,
             ConfigParamColumns.OPTIONS: json.dumps(list(options)) if options is not None else None,
-            ConfigParamColumns.MIN: None if min is None else _to_text(min),
-            ConfigParamColumns.MAX: None if max is None else _to_text(max),
+            ConfigParamColumns.MIN: min,
+            ConfigParamColumns.MAX: max,
+            ConfigParamColumns.UNIT: unit,
+            ConfigParamColumns.DESCRIPTION: description,
         }
         try:
             existing: Optional[ConfigParam] = self.get_by_code(code)
@@ -184,16 +160,30 @@ class ConfigParamsClient(_BaseTableClient):
             self._http.records_update(
                 self._table_id, {ConfigParamColumns.ID: existing.id, **structure},
             )
-        return self.get_by_code(code)
+        param = self.get_by_code(code)
+        if service_id is not None:
+            self._link(ConfigParamColumns.SERVICE, param.id, service_id)
+            param = self.get_by_code(code)
+        return param
 
 
 def _to_text(value: Any) -> str:
-    """Serialize a seed default to the text column (catalog stores values as text)."""
+    """Serialize a seed default to the text value column (the catalog stores values as text)."""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (list, dict)):
         return json.dumps(value)
     return str(value)
+
+
+def _to_float(value: Any) -> Optional[float]:
+    """Numeric bound from a NocoDB Number cell; ``None`` for blank/unparseable."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _row_to_param(row: dict[str, Any]) -> ConfigParam:
@@ -210,10 +200,13 @@ def _row_to_param(row: dict[str, Any]) -> ConfigParam:
         code=str(row[ConfigParamColumns.CODE]),
         value=str(row.get(ConfigParamColumns.VALUE, "")),
         type=ConfigType(str(row[ConfigParamColumns.TYPE])),
+        label=row.get(ConfigParamColumns.LABEL) or None,
         scope=row.get(ConfigParamColumns.SCOPE) or None,
-        category=row.get(ConfigParamColumns.CATEGORY) or None,
         description=row.get(ConfigParamColumns.DESCRIPTION) or None,
         options=[str(o) for o in options],
-        min=row.get(ConfigParamColumns.MIN) or None,
-        max=row.get(ConfigParamColumns.MAX) or None,
+        min=_to_float(row.get(ConfigParamColumns.MIN)),
+        max=_to_float(row.get(ConfigParamColumns.MAX)),
+        unit=row.get(ConfigParamColumns.UNIT) or None,
+        service_id=_resolve_link_id(row.get(ConfigParamColumns.SERVICE)),
+        service=_resolve_link_display(row.get(ConfigParamColumns.SERVICE), ServiceColumns.NAME),
     )
