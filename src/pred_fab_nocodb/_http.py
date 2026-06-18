@@ -124,6 +124,14 @@ class _NocoDBHttp:
         """`GET /api/v2/meta/tables/{tableId}` — full table metadata incl. columns."""
         return self._request("GET", f"/api/v2/meta/tables/{table_id}")
 
+    def meta_create_table(self, base_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """`POST /api/v2/meta/bases/{baseId}/tables` — create a table (``{title, columns:[...]}``)."""
+        return self._request("POST", f"/api/v2/meta/bases/{base_id}/tables", json=body)
+
+    def meta_create_column(self, table_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """`POST /api/v2/meta/tables/{tableId}/columns` — add a column (``{title, uidt, ...}``)."""
+        return self._request("POST", f"/api/v2/meta/tables/{table_id}/columns", json=body)
+
     def link_records(
         self,
         *,

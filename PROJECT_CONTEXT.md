@@ -53,6 +53,7 @@ at construction), so that back-edge is intentionally allowed.
 | `src/pred_fab_nocodb/datasets.py` | `DatasetsClient` + `Dataset` dataclass |
 | `src/pred_fab_nocodb/experiment_sets.py` | `ExperimentSetsClient` + `ExperimentSet` dataclass — named groups (members as JSON, link-free); supersedes `datasets` |
 | `src/pred_fab_nocodb/config_params.py` | `ConfigParamsClient` + `ConfigParam`/`ConfigType` + `coerce_value` — the single-SSOT config catalog (value-preserving upsert; type-driven coercion) |
+| `src/pred_fab_nocodb/provision.py` | Schema provisioner — `python -m pred_fab_nocodb.provision`; idempotent create-if-missing of the catalog tables/columns (meta-write; needs live-NocoDB validation). Runs before `materialise` |
 | `src/pred_fab_nocodb/materialise.py` | Config-catalog materialiser — `python -m pred_fab_nocodb.materialise --seed <json>`; one-shot, idempotent, value-preserving; the data-stack stack-up hook runs it |
 | `src/pred_fab_nocodb/_rows.py` | Shared row-field parsers (`_resolve_link_id` / `_resolve_link_code` / `_parse_dt`) — internal |
 | `src/pred_fab_nocodb/dim_positions.py` | `DimPositionsClient` + `DimPosition` dataclass |

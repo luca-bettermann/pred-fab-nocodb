@@ -155,6 +155,19 @@ class FakeNocoDBHttp:
         """Test helper: register column metadata returned by `meta_get_table`."""
         self._columns[table_id] = list(columns)
 
+    def meta_create_table(self, base_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Create a table (title == id, test convention) + register its columns."""
+        self.calls.append(("meta_create_table", base_id, None, body))
+        title = body["title"]
+        self._tables.setdefault(title, [])          # so it appears in meta_list_tables
+        self._columns[title] = list(body.get("columns", []))
+        return {"id": title, "title": title, "columns": self._columns[title]}
+
+    def meta_create_column(self, table_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("meta_create_column", table_id, None, body))
+        self._columns.setdefault(table_id, []).append(body)
+        return body
+
     # ─── Links API ────────────────────────────────────────────────────
 
     def link_records(
