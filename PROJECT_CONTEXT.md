@@ -19,7 +19,10 @@ flowchart TD
     client["NocoDBClient · facade"]
     client --> workflows["workflows · fab load / bundles"]
     client --> domain["entity clients<br/><i>_values · dim_positions · experiments · datasets ·<br/>experiment_sets · studies · study_constants</i>"]
+    client --> config["config catalog<br/><i>config_params · services · use_cases · units · hardware</i>"]
     workflows --> domain
+    config --> base
+    cli["provision · materialise<br/><i>stack-up CLIs</i>"] --> config
     domain --> base["_base · shared table client"]
     base --> http["_http · REST wrapper (httpx)"]
     http --> nocodb[("NocoDB REST API")]
@@ -40,7 +43,7 @@ at construction), so that back-edge is intentionally allowed.
 
 | Path | Contents |
 | ---- | -------- |
-| `src/pred_fab_nocodb/schema.py` | Table and column name constants, `Status` enum |
+| `src/pred_fab_nocodb/schema.py` | Table + column name constants; `Status`/`Strategy`/`Purpose` + the config-catalog enums `ConfigType`/`ConfigScope`/`HardwareType`; `PARAM_OWNER_COLUMNS` + `SEED_AUTHORITATIVE_SCOPES` |
 | `src/pred_fab_nocodb/client.py` | Public `NocoDBClient` entry point |
 | `src/pred_fab_nocodb/errors.py` | Exception types |
 | `src/pred_fab_nocodb/_http.py` | HTTP wrapper (auth, error mapping) — internal |
@@ -52,10 +55,14 @@ at construction), so that back-edge is intentionally allowed.
 | `src/pred_fab_nocodb/experiments.py` | `ExperimentsClient` + `Experiment` dataclass |
 | `src/pred_fab_nocodb/datasets.py` | `DatasetsClient` + `Dataset` dataclass |
 | `src/pred_fab_nocodb/experiment_sets.py` | `ExperimentSetsClient` + `ExperimentSet` dataclass — named groups (members as JSON, link-free); supersedes `datasets` |
-| `src/pred_fab_nocodb/config_params.py` | `ConfigParamsClient` + `ConfigParam`/`ConfigType` + `coerce_value` — the single-SSOT config catalog (value-preserving upsert; type-driven coercion) |
-| `src/pred_fab_nocodb/provision.py` | Schema provisioner — `python -m pred_fab_nocodb.provision`; idempotent create-if-missing of the catalog tables/columns (meta-write; needs live-NocoDB validation). Runs before `materialise` |
-| `src/pred_fab_nocodb/materialise.py` | Config-catalog materialiser — `python -m pred_fab_nocodb.materialise --seed <json>`; one-shot, idempotent, value-preserving; the data-stack stack-up hook runs it |
-| `src/pred_fab_nocodb/_rows.py` | Shared row-field parsers (`_resolve_link_id` / `_resolve_link_code` / `_parse_dt`) — internal |
+| `src/pred_fab_nocodb/config_params.py` | `ConfigParamsClient` + `ConfigParam`/`ParamOwner` + `coerce_value` — the `params` catalog (relational; scope-aware upsert; ≤1 polymorphic owner: service/hardware/unit) |
+| `src/pred_fab_nocodb/services.py` | `ServicesClient` + `Service` — capabilities, self-`requires` graph, dashboard JSON, `hardware` link |
+| `src/pred_fab_nocodb/use_cases.py` | `UseCasesClient` + `UseCase` — named bundles of services |
+| `src/pred_fab_nocodb/units.py` | `UnitsClient` + `Unit` — rig assemblies (robot/tool/sensors → `hardware` links) |
+| `src/pred_fab_nocodb/hardware.py` | `HardwareClient` + `Hardware`/`HardwareType` — physical device identity (the param/unit link-target) |
+| `src/pred_fab_nocodb/provision.py` | Schema provisioner — `python -m pred_fab_nocodb.provision`; idempotent create-if-missing of catalog tables/columns + LTAR links (live-validated on real NocoDB). Runs before `materialise` |
+| `src/pred_fab_nocodb/materialise.py` | Config-catalog materialiser — `python -m pred_fab_nocodb.materialise --seed <json>`; one-shot, idempotent, scope-aware (seed-authoritative for constant/safety); resolves name→id links in dependency order; the data-stack stack-up hook runs it |
+| `src/pred_fab_nocodb/_rows.py` | Shared row-field parsers (`_resolve_link_id`/`_resolve_link_ids`/`_resolve_link_display`/`_resolve_link_displays`/`_parse_json_dict`/`_parse_dt`) — internal |
 | `src/pred_fab_nocodb/dim_positions.py` | `DimPositionsClient` + `DimPosition` dataclass |
 | `src/pred_fab_nocodb/study_constants.py` | `StudyConstantsClient` |
 | `src/pred_fab_nocodb/workflows.py` | `WorkflowsClient` + payload dataclasses (`FabricationLoad`, `ExperimentBundle`, `ExperimentPlan`). Trajectory projection to a schedule axis lives on `FabricationLoad.as_overrides(schedule_dim=…)` |
@@ -67,7 +74,9 @@ at construction), so that back-edge is intentionally allowed.
 - All client methods raise from `errors.py` on failure; no silent fallbacks.
 - `dim_positions` codes generated as `'{domain}.d{depth}.{count}'`; counter is per-`(domain, depth)`.
 - `axes` JSON stored canonically (sorted keys, no whitespace) to enable `UNIQUE(domain, axes)`.
-- `ValueClient` is one parameterised class used by `params`, `features`, `attributes` (identical table shape).
+- `ValueClient` is one parameterised class used by `set_exp_params`, `features`, `attributes` (identical table shape) — distinct from the `params` *catalog* (`ConfigParamsClient`): values vs definitions.
+- **Config-catalog read API** (consumers, e.g. rtde's loader): a param's owner is `ConfigParam.owner → ParamOwner(kind, id, name) | None` (`kind ∈ {service,hardware,unit}`, `None` = global; raises if 2+ set). `Hardware(name, type, kind)` via `client.hardware`; `Service.hardware`, `Unit.robot`/`tool`/`sensors` carry device names. A device's physics = the `params` it owns; `mount` = two `vector` params (`*.mount.line`/`*.mount.point`).
+- **Catalog links are all `mm`** (one base models every relation as an m2m junction — proven on the live base); the ≤1-owner exclusivity is an app invariant enforced fail-loud in the client + materialiser (NocoDB can't). Scope-aware upsert: `knob`/`editable` preserve the runtime value, `constant`/`safety` re-seed (seed-authoritative).
 - `_NocoDBHttp` (`_http.py`) is the only direct REST surface; tests substitute a fake.
 
 ## Open risks
