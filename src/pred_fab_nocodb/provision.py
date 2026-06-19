@@ -90,7 +90,7 @@ def _scalar_columns() -> dict[str, list[dict[str, Any]]]:
             _text(_S.NAME), _checkbox(_S.ENABLED), _text(_S.KIND), _longtext(_S.DASHBOARD),
         ],
         Tables.USE_CASES: [
-            _text(_UC.NAME), _longtext(_UC.DESCRIPTION),
+            _text(_UC.NAME), _longtext(_UC.DESCRIPTION), _longtext(_UC.SET),
         ],
         Tables.UNITS: [
             _text(_U.ROLE),  # robot/tool/sensors are LTARs → hardware, added in pass 2

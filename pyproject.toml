@@ -1,6 +1,6 @@
 [project]
 name = "pred-fab-nocodb"
-version = "0.3.0"
+version = "0.3.1"
 description = "NocoDB binding for the pred-fab data model"
 readme = "README.md"
 requires-python = ">=3.11"

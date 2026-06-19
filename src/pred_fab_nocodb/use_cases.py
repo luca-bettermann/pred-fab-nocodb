@@ -5,11 +5,12 @@ One row per use-case, keyed by ``name``; ``services`` is a many-to-many link to 
 never prunes)."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ._base import _BaseTableClient
-from ._rows import _resolve_link_displays, _resolve_link_ids
+from ._rows import _parse_json_dict, _resolve_link_displays, _resolve_link_ids
 from .errors import NotFoundError
 from .schema import ServiceColumns, UseCaseColumns
 
@@ -23,6 +24,7 @@ class UseCase:
     description: Optional[str] = None
     services: list[str] = field(default_factory=list)       # bundled service names
     service_ids: list[int] = field(default_factory=list)    # bundled service ids
+    overrides: Optional[dict[str, Any]] = None              # the `set` column: per-use-case param overrides (code → value)
 
 
 class UseCasesClient(_BaseTableClient):
@@ -49,13 +51,16 @@ class UseCasesClient(_BaseTableClient):
         name: str,
         description: Optional[str] = None,
         service_ids: Optional[list[int]] = None,
+        overrides: Optional[dict[str, Any]] = None,
     ) -> UseCase:
         """Create or update a use-case row, keyed by ``name``; re-assert its ``services`` links.
 
-        ``service_ids`` are resolved service ids (the caller maps names → ids)."""
+        ``service_ids`` are resolved service ids (the caller maps names → ids); ``overrides`` is
+        the ``set`` map of per-use-case param overrides (code → value), stored as JSON."""
         body: dict[str, Any] = {
             UseCaseColumns.NAME: name,
             UseCaseColumns.DESCRIPTION: description,
+            UseCaseColumns.SET: json.dumps(overrides) if overrides is not None else None,
         }
         try:
             existing: Optional[UseCase] = self.get_by_name(name)
@@ -80,4 +85,5 @@ def _row_to_use_case(row: dict[str, Any]) -> UseCase:
         description=row.get(UseCaseColumns.DESCRIPTION) or None,
         services=_resolve_link_displays(row.get(UseCaseColumns.SERVICES), ServiceColumns.NAME),
         service_ids=_resolve_link_ids(row.get(UseCaseColumns.SERVICES)),
+        overrides=_parse_json_dict(row.get(UseCaseColumns.SET)),
     )

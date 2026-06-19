@@ -17,9 +17,11 @@ materialised in dependency order (``hardware`` → ``services`` → ``use_cases`
 ``params``) so links resolve:
 
     {"hardware":   [{"name": "UR10e", "type": "robot", "kind": "UR10e"}],
-     "services":   [{"name": "...", "enabled": true, "kind": "...", "dashboard": {...},
+     "services":   [{"name": "...", "enabled": true, "kind": "...",
+                     "dashboard": [{"kind": "rate", "field": "...", "tab": "..."}],
                      "requires": ["..."], "hardware": "Gocator"}],
-     "use_cases":  [{"name": "...", "description": "...", "services": ["..."]}],
+     "use_cases":  [{"name": "...", "description": "...", "services": ["..."],
+                     "set": {"camera.profile": "array"}}],
      "units":      [{"role": "printer", "robot": "UR10e", "tool": "WASPclay",
                      "sensors": ["Gocator"]}],
      "params":     [{"code": "...", "value": ..., "type": "real", "scope": "knob",
@@ -98,7 +100,10 @@ def materialise_config_catalog(
 
     for u in uc_rows:
         sids = [service_ids[n] for n in u.get("services", []) if n in service_ids]
-        use_cases.upsert(name=u["name"], description=u.get("description"), service_ids=sids or None)
+        use_cases.upsert(
+            name=u["name"], description=u.get("description"),
+            service_ids=sids or None, overrides=u.get("set"),
+        )
 
     unit_ids: dict[str, int] = {}
     for u in unit_rows:

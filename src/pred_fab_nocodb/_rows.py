@@ -93,18 +93,24 @@ def _resolve_link_displays(value: Any, key: str) -> list[str]:
     return out
 
 
-def _parse_json_dict(value: Any) -> Optional[dict[str, Any]]:
-    """Deserialize a LongText (JSON) column to a dict; None if blank or unparseable.
-
-    An already-parsed dict passes through (response-shape robustness)."""
+def _parse_json(value: Any) -> Any:
+    """Deserialize a LongText (JSON) column to its value (dict OR list); None if blank or
+    unparseable. An already-parsed dict/list passes through (response-shape robustness)."""
     if value is None or value == "":
         return None
-    if isinstance(value, dict):
+    if isinstance(value, (dict, list)):
         return value
     try:
-        parsed = json.loads(value)
+        return json.loads(value)
     except (json.JSONDecodeError, TypeError):
         return None
+
+
+def _parse_json_dict(value: Any) -> Optional[dict[str, Any]]:
+    """Deserialize a LongText (JSON) column to a dict; None if blank, unparseable, or non-object.
+
+    An already-parsed dict passes through (response-shape robustness)."""
+    parsed = _parse_json(value)
     return parsed if isinstance(parsed, dict) else None
 
 

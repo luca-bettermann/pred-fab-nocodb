@@ -26,10 +26,12 @@ _SEED = {
     ],
     "services": [
         {"name": "extruder", "kind": "actuator", "enabled": True},
-        {"name": "scan", "kind": "sensor", "requires": ["extruder"], "dashboard": {"panel": "scan"},
+        {"name": "scan", "kind": "sensor", "requires": ["extruder"],
+         "dashboard": [{"kind": "rate", "field": "power_hz", "tab": "scan"}],  # LIST, not dict
          "hardware": "Gocator"},
     ],
-    "use_cases": [{"name": "print", "description": "layerwise", "services": ["extruder", "scan"]}],
+    "use_cases": [{"name": "print", "description": "layerwise", "services": ["extruder", "scan"],
+                   "set": {"camera.profile": "array"}}],
     "units": [{"role": "printer", "robot": "UR10e", "tool": "WASPclay", "sensors": ["Gocator"]}],
     "params": [
         {"code": "fab_speed", "value": 0.05, "type": "real", "scope": "knob", "service": "extruder"},
@@ -59,11 +61,15 @@ def test_materialise_seeds_all_sections_and_links(fake_http):
     counts = materialise_config_catalog(seed=_SEED, **cl)
     assert counts == {"hardware": 3, "services": 2, "use_cases": 1, "units": 1, "params": 4}
 
-    # service → its hardware device
-    assert cl["services"].get_by_name("scan").hardware == "Gocator"
+    # service → its hardware device; dashboard round-trips as a LIST
+    scan = cl["services"].get_by_name("scan")
+    assert scan.hardware == "Gocator"
+    assert scan.dashboard == [{"kind": "rate", "field": "power_hz", "tab": "scan"}]
     # unit composed of hardware devices
     printer = cl["units"].get_by_role("printer")
     assert printer.robot == "UR10e" and printer.tool == "WASPclay" and printer.sensors == ["Gocator"]
+    # use-case `set` overrides round-trip
+    assert cl["use_cases"].get_by_name("print").overrides == {"camera.profile": "array"}
     # polymorphic param owners resolve to the right (kind, name)
     fab = cl["params"].get_by_code("fab_speed").owner
     assert fab is not None and (fab.kind, fab.name) == ("service", "extruder")

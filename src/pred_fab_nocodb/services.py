@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ._base import _BaseTableClient
-from ._rows import _parse_json_dict, _resolve_link_display, _resolve_link_displays, _resolve_link_ids, _resolve_link_id
+from ._rows import _parse_json, _resolve_link_display, _resolve_link_displays, _resolve_link_ids, _resolve_link_id
 from .errors import NotFoundError
 from .schema import HardwareColumns, ServiceColumns
 
@@ -26,7 +26,7 @@ class Service:
     kind: Optional[str] = None
     requires: list[str] = field(default_factory=list)       # required service names
     requires_ids: list[int] = field(default_factory=list)   # required service ids
-    dashboard: Optional[dict[str, Any]] = None
+    dashboard: Optional[Any] = None                         # dashboard config (JSON: list of descriptors, or dict)
     hardware: Optional[str] = None                          # the device this service drives (sensors)
     hardware_id: Optional[int] = None
 
@@ -55,14 +55,15 @@ class ServicesClient(_BaseTableClient):
         name: str,
         enabled: bool = True,
         kind: Optional[str] = None,
-        dashboard: Optional[dict[str, Any]] = None,
+        dashboard: Optional[Any] = None,
         requires_ids: Optional[list[int]] = None,
         hardware_id: Optional[int] = None,
     ) -> Service:
         """Create or update a service row, keyed by ``name``; re-assert its links.
 
-        ``requires_ids`` are resolved service ids; ``hardware_id`` the device a sensor service
-        drives (both resolved by the caller). Linking is additive/idempotent."""
+        ``dashboard`` is a JSON value (a list of panel descriptors, or a dict). ``requires_ids``
+        are resolved service ids; ``hardware_id`` the device a sensor service drives (both
+        resolved by the caller). Linking is additive/idempotent."""
         body: dict[str, Any] = {
             ServiceColumns.NAME: name,
             ServiceColumns.ENABLED: enabled,
@@ -96,7 +97,7 @@ def _row_to_service(row: dict[str, Any]) -> Service:
         kind=row.get(ServiceColumns.KIND) or None,
         requires=_resolve_link_displays(row.get(ServiceColumns.REQUIRES), ServiceColumns.NAME),
         requires_ids=_resolve_link_ids(row.get(ServiceColumns.REQUIRES)),
-        dashboard=_parse_json_dict(row.get(ServiceColumns.DASHBOARD)),
+        dashboard=_parse_json(row.get(ServiceColumns.DASHBOARD)),
         hardware=_resolve_link_display(row.get(ServiceColumns.HARDWARE), HardwareColumns.NAME),
         hardware_id=_resolve_link_id(row.get(ServiceColumns.HARDWARE)),
     )

@@ -57,7 +57,7 @@ at construction), so that back-edge is intentionally allowed.
 | `src/pred_fab_nocodb/experiment_sets.py` | `ExperimentSetsClient` + `ExperimentSet` dataclass — named groups (members as JSON, link-free); supersedes `datasets` |
 | `src/pred_fab_nocodb/config_params.py` | `ConfigParamsClient` + `ConfigParam`/`ParamOwner` + `coerce_value` — the `params` catalog (relational; scope-aware upsert; ≤1 polymorphic owner: service/hardware/unit) |
 | `src/pred_fab_nocodb/services.py` | `ServicesClient` + `Service` — capabilities, self-`requires` graph, dashboard JSON, `hardware` link |
-| `src/pred_fab_nocodb/use_cases.py` | `UseCasesClient` + `UseCase` — named bundles of services |
+| `src/pred_fab_nocodb/use_cases.py` | `UseCasesClient` + `UseCase` — named bundles of services + a `set` (JSON) map of per-use-case param overrides |
 | `src/pred_fab_nocodb/units.py` | `UnitsClient` + `Unit` — rig assemblies (robot/tool/sensors → `hardware` links) |
 | `src/pred_fab_nocodb/hardware.py` | `HardwareClient` + `Hardware`/`HardwareType` — physical device identity (the param/unit link-target) |
 | `src/pred_fab_nocodb/provision.py` | Schema provisioner — `python -m pred_fab_nocodb.provision`; idempotent create-if-missing of catalog tables/columns + LTAR links (live-validated on real NocoDB). Runs before `materialise` |

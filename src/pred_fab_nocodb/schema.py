@@ -153,6 +153,7 @@ class UseCaseColumns:
     NAME = "name"              # unique use-case identity
     DESCRIPTION = "description"
     SERVICES = "services"      # LinkToAnotherRecord -> services (m2m)
+    SET = "set"                # LongText (JSON) — per-use-case param overrides (code → value)
 
 
 class UnitColumns:
