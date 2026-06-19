@@ -9,11 +9,14 @@ from pred_fab_nocodb.schema import (
     ConfigParamColumns,
     ConfigScope,
     ConfigType,
+    HardwareColumns,
+    HardwareType,
     ServiceColumns,
     Tables,
+    UnitColumns,
 )
 
-_CATALOG = {Tables.PARAMS, Tables.SERVICES, Tables.USE_CASES, Tables.UNITS}
+_CATALOG = {Tables.PARAMS, Tables.SERVICES, Tables.USE_CASES, Tables.UNITS, Tables.HARDWARE}
 
 
 def _cols(fake_http, table):
@@ -31,6 +34,10 @@ def test_creates_all_catalog_tables(fake_http):
     # min / max are numeric Number columns (bounds are numeric-only).
     assert pcols[ConfigParamColumns.MIN]["uidt"] == "Number"
     assert pcols[ConfigParamColumns.MAX]["uidt"] == "Number"
+    # hardware.type is a SingleSelect over HardwareType.
+    htype = _cols(fake_http, Tables.HARDWARE)[HardwareColumns.TYPE]
+    assert htype["uidt"] == "SingleSelect"
+    assert {o["title"] for o in htype["colOptions"]["options"]} == {m.value for m in HardwareType}
 
 
 def test_creates_ltar_links(fake_http):
@@ -39,9 +46,17 @@ def test_creates_ltar_links(fake_http):
     # services.requires is a SELF link back to services.
     req = _cols(fake_http, Tables.SERVICES)[ServiceColumns.REQUIRES]
     assert req["uidt"] == "LinkToAnotherRecord" and req["childId"] == Tables.SERVICES and req["type"] == "mm"
-    # a param links its service over an m2m column (linked single), matching the base convention.
-    svc = _cols(fake_http, Tables.PARAMS)[ConfigParamColumns.SERVICE]
-    assert svc["uidt"] == "LinkToAnotherRecord" and svc["childId"] == Tables.SERVICES and svc["type"] == "mm"
+    # the polymorphic owner links on params all target their tables as mm.
+    pcols = _cols(fake_http, Tables.PARAMS)
+    for col, target in [(ConfigParamColumns.SERVICE, Tables.SERVICES),
+                        (ConfigParamColumns.HARDWARE, Tables.HARDWARE),
+                        (ConfigParamColumns.UNIT_OWNER, Tables.UNITS)]:
+        assert pcols[col]["uidt"] == "LinkToAnotherRecord" and pcols[col]["childId"] == target and pcols[col]["type"] == "mm"
+    # units.robot/tool/sensors + services.hardware all link to hardware.
+    ucols = _cols(fake_http, Tables.UNITS)
+    for col in (UnitColumns.ROBOT, UnitColumns.TOOL, UnitColumns.SENSORS):
+        assert ucols[col]["childId"] == Tables.HARDWARE
+    assert _cols(fake_http, Tables.SERVICES)[ServiceColumns.HARDWARE]["childId"] == Tables.HARDWARE
 
 
 def test_idempotent_when_present(fake_http):
@@ -61,4 +76,4 @@ def test_adds_only_missing_columns(fake_http):
     added = result["added_columns"][Tables.PARAMS]
     assert ConfigParamColumns.CODE not in added                          # present → not re-added
     assert ConfigParamColumns.LABEL in added                             # missing → added
-    assert {Tables.SERVICES, Tables.USE_CASES, Tables.UNITS} <= set(result["created_tables"])
+    assert {Tables.SERVICES, Tables.USE_CASES, Tables.UNITS, Tables.HARDWARE} <= set(result["created_tables"])

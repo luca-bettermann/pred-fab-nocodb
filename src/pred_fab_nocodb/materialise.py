@@ -1,32 +1,34 @@
 """Config-catalog materialiser — seed the robolab config catalog from a repo seed.
 
 Run at stack-up (after NocoDB is healthy) to bring the catalog into line with the deployed
-config seed. Idempotent and **value-preserving** for params (delegates to
-``ConfigParamsClient.upsert``): re-running refreshes structural metadata but never clobbers a
-runtime-edited param value. **Seed-agnostic** — it consumes a *normalised* seed; the
-producing service (rtde) maps its ``config/*.yaml`` to this shape, so the materialiser never
-couples to rtde's config format.
+config seed. **Scope-aware** for params (delegates to ``ConfigParamsClient.upsert``): tunable
+values (`knob`/`editable`) are preserved across re-runs, `constant`/`safety` re-seed
+overwrites. **Seed-agnostic** — it consumes a *normalised* seed; the producing service (rtde)
+maps its ``config/*.yaml`` to this shape.
 
 CLI (one-shot; the data-stack compose runs it after NocoDB is healthy)::
 
     python -m pred_fab_nocodb.materialise --seed <path.json>
 
-The seed is **JSON** with optional sections ``services`` / ``use_cases`` / ``units`` /
-``params`` (a bare list is taken as ``params``). Cross-table references are by **name**
-(services/use_cases/units) and resolved to ids here; ``services`` are materialised first so
-the others can link them:
+The seed is **JSON** with optional sections ``hardware`` / ``services`` / ``use_cases`` /
+``units`` / ``params`` (a bare list is taken as ``params``). Cross-table references are by
+**name** (services/hardware) or **role** (units), resolved to ids here; sections are
+materialised in dependency order (``hardware`` → ``services`` → ``use_cases`` → ``units`` →
+``params``) so links resolve:
 
-    {"services":  [{"name": "...", "enabled": true, "kind": "...", "dashboard": {...},
-                    "requires": ["other-service"]}],
-     "use_cases": [{"name": "...", "description": "...", "services": ["..."]}],
-     "units":     [{"role": "printer", "robot": "...", "tool": "...", "sensors": ["..."]}],
-     "params":    [{"code": "...", "value": ..., "type": "real", "label": "...",
-                    "scope": "knob", "options": [...], "min": ..., "max": ..., "unit": "...",
-                    "service": "service-name"}]}
+    {"hardware":   [{"name": "UR10e", "type": "robot", "kind": "UR10e"}],
+     "services":   [{"name": "...", "enabled": true, "kind": "...", "dashboard": {...},
+                     "requires": ["..."], "hardware": "Gocator"}],
+     "use_cases":  [{"name": "...", "description": "...", "services": ["..."]}],
+     "units":      [{"role": "printer", "robot": "UR10e", "tool": "WASPclay",
+                     "sensors": ["Gocator"]}],
+     "params":     [{"code": "...", "value": ..., "type": "real", "scope": "knob",
+                     "options": [...], "min": ..., "max": ..., "unit": "...",
+                     "service": "..." | "hardware": "..." | "unit": "printer"}]}
 
-Env: ``NOCODB_URL``, ``NOCODB_API_TOKEN``, ``NOCODB_ROBOLAB_BASE_ID``. Exit 0 on success, 2 if the
-catalog tables aren't provisioned in the base (row materialiser, not a table-creator — run
-:mod:`provision` first).
+A param carries **at most one** owner key (`service`/`hardware`/`unit`); 2+ fails loud.
+Env: ``NOCODB_URL``, ``NOCODB_API_TOKEN``, ``NOCODB_ROBOLAB_BASE_ID``. Exit 0 on success, 2 if
+the catalog tables aren't provisioned (run :mod:`provision` first).
 """
 from __future__ import annotations
 
@@ -40,12 +42,15 @@ from typing import Any
 from ._http import _NocoDBHttp
 from .client import _resolve_link_field_ids
 from .config_params import ConfigParamsClient
-from .schema import ConfigType, Tables
+from .hardware import HardwareClient
+from .schema import ConfigType, HardwareType, Tables
 from .services import ServicesClient
 from .units import UnitsClient
 from .use_cases import UseCasesClient
 
-_CATALOG_TABLES = (Tables.PARAMS, Tables.SERVICES, Tables.USE_CASES, Tables.UNITS)
+_CATALOG_TABLES = (
+    Tables.PARAMS, Tables.SERVICES, Tables.USE_CASES, Tables.UNITS, Tables.HARDWARE,
+)
 
 
 def materialise_config_catalog(
@@ -54,16 +59,24 @@ def materialise_config_catalog(
     services: ServicesClient,
     use_cases: UseCasesClient,
     units: UnitsClient,
+    hardware: HardwareClient,
     seed: dict[str, list[dict[str, Any]]],
 ) -> dict[str, int]:
     """Upsert every seed section in dependency order; returns per-section row counts.
 
-    ``services`` first (two sub-passes: create all, then link ``requires`` once every service
-    exists), then ``use_cases`` / ``units`` / ``params`` resolving their name references."""
+    ``hardware`` first (devices are the link-target), then ``services`` (two sub-passes: create
+    all, then link ``requires``/``hardware`` once everything exists), then ``use_cases`` /
+    ``units`` / ``params`` resolving their name/role references."""
+    hw_rows = seed.get("hardware", [])
     svc_rows = seed.get("services", [])
     uc_rows = seed.get("use_cases", [])
     unit_rows = seed.get("units", [])
     param_rows = seed.get("params", [])
+
+    hardware_ids: dict[str, int] = {}
+    for h in hw_rows:
+        rec = hardware.upsert(name=h["name"], device_type=HardwareType(h["type"]), kind=h.get("kind"))
+        hardware_ids[rec.name] = rec.id
 
     service_ids: dict[str, int] = {}
     for s in svc_rows:
@@ -74,31 +87,42 @@ def materialise_config_catalog(
         service_ids[rec.name] = rec.id
     for s in svc_rows:
         requires = [service_ids[r] for r in s.get("requires", []) if r in service_ids]
-        if requires:
+        hw_name = s.get("hardware")
+        hw_id = hardware_ids.get(hw_name) if hw_name else None
+        if requires or hw_id is not None:
             services.upsert(
                 name=s["name"], enabled=s.get("enabled", True),
-                kind=s.get("kind"), dashboard=s.get("dashboard"), requires_ids=requires,
+                kind=s.get("kind"), dashboard=s.get("dashboard"),
+                requires_ids=requires or None, hardware_id=hw_id,
             )
 
     for u in uc_rows:
         sids = [service_ids[n] for n in u.get("services", []) if n in service_ids]
         use_cases.upsert(name=u["name"], description=u.get("description"), service_ids=sids or None)
 
+    unit_ids: dict[str, int] = {}
     for u in unit_rows:
-        sids = [service_ids[n] for n in u.get("sensors", []) if n in service_ids]
-        units.upsert(role=u["role"], robot=u.get("robot"), tool=u.get("tool"), sensor_ids=sids or None)
+        sids = [hardware_ids[n] for n in u.get("sensors", []) if n in hardware_ids]
+        rec = units.upsert(
+            role=u["role"],
+            robot_id=hardware_ids.get(u["robot"]) if u.get("robot") else None,
+            tool_id=hardware_ids.get(u["tool"]) if u.get("tool") else None,
+            sensor_ids=sids or None,
+        )
+        unit_ids[rec.role] = rec.id
 
     for p in param_rows:
-        svc_name = p.get("service")
         params.upsert(
             code=p["code"], value=p.get("value"), value_type=ConfigType(p["type"]),
             label=p.get("label"), scope=p.get("scope"), description=p.get("description"),
             options=p.get("options"), min=p.get("min"), max=p.get("max"), unit=p.get("unit"),
-            service_id=service_ids.get(svc_name) if svc_name else None,
+            service_id=service_ids.get(p["service"]) if p.get("service") else None,
+            hardware_id=hardware_ids.get(p["hardware"]) if p.get("hardware") else None,
+            unit_id=unit_ids.get(p["unit"]) if p.get("unit") else None,
         )
 
     return {
-        "services": len(svc_rows), "use_cases": len(uc_rows),
+        "hardware": len(hw_rows), "services": len(svc_rows), "use_cases": len(uc_rows),
         "units": len(unit_rows), "params": len(param_rows),
     }
 
@@ -142,6 +166,8 @@ def main(argv: list[str] | None = None) -> int:
                                  link_field_ids=links.get(Tables.USE_CASES, {})),
         units=UnitsClient(http, base_id, cat_ids[Tables.UNITS],
                           link_field_ids=links.get(Tables.UNITS, {})),
+        hardware=HardwareClient(http, base_id, cat_ids[Tables.HARDWARE],
+                                link_field_ids=links.get(Tables.HARDWARE, {})),
         seed=load_seed(args.seed),
     )
     print("materialised " + ", ".join(f"{n} {k}" for k, n in counts.items()))

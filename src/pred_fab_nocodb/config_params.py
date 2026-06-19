@@ -1,26 +1,34 @@
 """`params` config-catalog client — the relational config SSOT (tunable-leaf definitions).
 
 One row per config *definition*, keyed by ``code`` (distinct from `set_exp_params`, which
-holds per-experiment param *values*). ``value`` is the runtime SSOT seed default:
-:meth:`ConfigParamsClient.upsert` is **value-preserving** — re-seeding from the repo
-refreshes the *structure* (label/type/scope/options/bounds/unit/service) but never clobbers
-a runtime-edited value. ``type`` is the coercion authority for the (text-stored) value;
-:func:`coerce_value` is the one place raw → typed happens, so every consumer (rtde's
-synthesiser, pred-fab) coerces identically. See the KB note *Design NocoDB params +
-experiment registry*.
+holds per-experiment param *values*). ``value`` is the seed default; the upsert is
+**value-preserving for tunable scopes** (`knob`/`editable` — NocoDB is the runtime SSOT) but
+**seed-authoritative for `constant`/`safety`** (config-as-code — re-seed overwrites). ``type``
+is the coercion authority for the (text-stored) value; :func:`coerce_value` is the one place
+raw → typed happens. A param has a **polymorphic owner** — at most one of service/hardware/unit
+(0 = global); >1 fails loud (NocoDB can't enforce the exclusivity). See the KB note *Design
+NocoDB params + experiment registry*.
 """
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ._base import _BaseTableClient
 from ._rows import _resolve_link_display, _resolve_link_id
 from .errors import NotFoundError, ValidationError
-from .schema import ConfigParamColumns, ConfigScope, ConfigType, ServiceColumns
+from .schema import (
+    ConfigParamColumns,
+    ConfigScope,
+    ConfigType,
+    HardwareColumns,
+    SEED_AUTHORITATIVE_SCOPES,
+    ServiceColumns,
+    UnitColumns,
+)
 
-__all__ = ["ConfigType", "ConfigScope", "ConfigParam", "ConfigParamsClient", "coerce_value"]
+__all__ = ["ConfigType", "ConfigScope", "ConfigParam", "ParamOwner", "ConfigParamsClient", "coerce_value"]
 
 _TRUE = {"true", "1", "yes", "on"}
 _FALSE = {"false", "0", "no", "off"}
@@ -55,6 +63,14 @@ def coerce_value(raw: Any, value_type: ConfigType) -> Any:
     return str(raw)  # CATEGORICAL
 
 
+class ParamOwner(NamedTuple):
+    """A param's single owner: ``kind`` (service/hardware/unit), record id, display name."""
+
+    kind: str
+    id: int
+    name: str
+
+
 @dataclass(frozen=True)
 class ConfigParam:
     """One definition row from the `params` config catalog."""
@@ -72,6 +88,10 @@ class ConfigParam:
     unit: Optional[str] = None
     service_id: Optional[int] = None
     service: Optional[str] = None
+    hardware_id: Optional[int] = None
+    hardware: Optional[str] = None
+    unit_owner_id: Optional[int] = None
+    unit_owner: Optional[str] = None
 
     @property
     def coerced(self) -> Any:
@@ -80,10 +100,7 @@ class ConfigParam:
 
     @property
     def coerced_min(self) -> Any:
-        """The lower sanity bound coerced to the param's type (``None`` if unset).
-
-        rtde's preflight safety check reads these for the params the collision gate
-        computes with; bounds share the param's type (a real's bounds are reals)."""
+        """The lower sanity bound coerced to the param's type (``None`` if unset)."""
         return None if self.min is None else coerce_value(self.min, self.type)
 
     @property
@@ -91,9 +108,36 @@ class ConfigParam:
         """The upper sanity bound coerced to the param's type (``None`` if unset)."""
         return None if self.max is None else coerce_value(self.max, self.type)
 
+    @property
+    def owner(self) -> Optional[ParamOwner]:
+        """The single owner (or ``None`` = global). Raises if 2+ links are set — the
+        invariant NocoDB can't enforce, surfaced fail-loud on read as well as write."""
+        found = [
+            ParamOwner(kind, oid, name or "")
+            for kind, oid, name in (
+                ("service", self.service_id, self.service),
+                ("hardware", self.hardware_id, self.hardware),
+                ("unit", self.unit_owner_id, self.unit_owner),
+            )
+            if oid is not None
+        ]
+        if len(found) > 1:
+            raise ValidationError(
+                f"param {self.code!r} has {len(found)} owners ({[o.kind for o in found]}); ≤1 allowed"
+            )
+        return found[0] if found else None
+
+
+# Owner-link column → the related table's display field (for read-back resolution).
+_OWNER_DISPLAY = {
+    ConfigParamColumns.SERVICE: ServiceColumns.NAME,
+    ConfigParamColumns.HARDWARE: HardwareColumns.NAME,
+    ConfigParamColumns.UNIT_OWNER: UnitColumns.ROLE,
+}
+
 
 class ConfigParamsClient(_BaseTableClient):
-    """Read/write the `params` config catalog (value-preserving upsert; nullable service link)."""
+    """Read/write the `params` config catalog (scope-aware upsert; ≤1 polymorphic owner)."""
 
     def get_by_code(self, code: str) -> ConfigParam:
         rows = self._http.records_list(
@@ -126,15 +170,27 @@ class ConfigParamsClient(_BaseTableClient):
         max: Optional[float] = None,
         unit: Optional[str] = None,
         service_id: Optional[int] = None,
+        hardware_id: Optional[int] = None,
+        unit_id: Optional[int] = None,
     ) -> ConfigParam:
-        """Create or update a definition row, keyed by ``code``.
+        """Create or update a definition row, keyed by ``code``; set its ≤1 owner link.
 
-        **Value-preserving:** on an existing row, refresh the structural metadata
-        (label/type/scope/options/bounds/unit) and re-assert the ``service`` link, but
-        **never overwrite the stored ``value``** — NocoDB is the runtime SSOT for values, the
-        repo seed only for structure. ``value`` is written only on first creation (the seed
-        default). ``min``/``max`` are numeric bounds; ``service_id`` links the configured
-        service (resolved by the caller)."""
+        **Scope-aware value authority:** ``value`` is written on creation and, for
+        **`constant`/`safety`** scopes, re-written on every upsert (seed-authoritative —
+        config-as-code). For **`knob`/`editable`** it is preserved on update (NocoDB is the
+        runtime SSOT). The owner is at most one of ``service_id``/``hardware_id``/``unit_id``
+        (resolved by the caller) — **2+ raises** (the exclusivity NocoDB can't enforce)."""
+        owners = {
+            ConfigParamColumns.SERVICE: service_id,
+            ConfigParamColumns.HARDWARE: hardware_id,
+            ConfigParamColumns.UNIT_OWNER: unit_id,
+        }
+        set_owners = {col: oid for col, oid in owners.items() if oid is not None}
+        if len(set_owners) > 1:
+            raise ValidationError(
+                f"param {code!r} given {len(set_owners)} owners ({sorted(set_owners)}); ≤1 allowed"
+            )
+
         structure: dict[str, Any] = {
             ConfigParamColumns.CODE: code,
             ConfigParamColumns.LABEL: label,
@@ -151,20 +207,21 @@ class ConfigParamsClient(_BaseTableClient):
         except NotFoundError:
             existing = None
 
+        seed_authoritative = scope is not None and ConfigScope(scope) in SEED_AUTHORITATIVE_SCOPES
         if existing is None:
             self._http.records_create(
                 self._table_id, {**structure, ConfigParamColumns.VALUE: _to_text(value)},
             )
         else:
-            # Refresh structure only; the runtime value is preserved.
-            self._http.records_update(
-                self._table_id, {ConfigParamColumns.ID: existing.id, **structure},
-            )
+            body = {ConfigParamColumns.ID: existing.id, **structure}
+            if seed_authoritative:
+                body[ConfigParamColumns.VALUE] = _to_text(value)  # config-as-code: re-seed wins
+            self._http.records_update(self._table_id, body)
+
         param = self.get_by_code(code)
-        if service_id is not None:
-            self._link(ConfigParamColumns.SERVICE, param.id, service_id)
-            param = self.get_by_code(code)
-        return param
+        for col, oid in set_owners.items():
+            self._link(col, param.id, oid)
+        return self.get_by_code(code) if set_owners else param
 
 
 def _to_text(value: Any) -> str:
@@ -208,5 +265,9 @@ def _row_to_param(row: dict[str, Any]) -> ConfigParam:
         max=_to_float(row.get(ConfigParamColumns.MAX)),
         unit=row.get(ConfigParamColumns.UNIT) or None,
         service_id=_resolve_link_id(row.get(ConfigParamColumns.SERVICE)),
-        service=_resolve_link_display(row.get(ConfigParamColumns.SERVICE), ServiceColumns.NAME),
+        service=_resolve_link_display(row.get(ConfigParamColumns.SERVICE), _OWNER_DISPLAY[ConfigParamColumns.SERVICE]),
+        hardware_id=_resolve_link_id(row.get(ConfigParamColumns.HARDWARE)),
+        hardware=_resolve_link_display(row.get(ConfigParamColumns.HARDWARE), _OWNER_DISPLAY[ConfigParamColumns.HARDWARE]),
+        unit_owner_id=_resolve_link_id(row.get(ConfigParamColumns.UNIT_OWNER)),
+        unit_owner=_resolve_link_display(row.get(ConfigParamColumns.UNIT_OWNER), _OWNER_DISPLAY[ConfigParamColumns.UNIT_OWNER]),
     )

@@ -25,7 +25,8 @@ class Tables:
     PARAMS = "params"           # tunable-leaf definitions (the config catalog)
     SERVICES = "services"       # capabilities; self-`Requires` dependency graph
     USE_CASES = "use_cases"     # named bundles of services
-    UNITS = "units"             # per-rig hardware (printer / scanner …)
+    UNITS = "units"             # rig assemblies (printer / scanner …) — compositions of hardware
+    HARDWARE = "hardware"       # physical device identity (robot / tool / sensor)
 
 
 class StudyColumns:
@@ -89,7 +90,9 @@ class ConfigParamColumns:
     *values*: this is the catalog of definitions). ``VALUE`` is the runtime SSOT seed
     default (value-preserving upsert never clobbers it). ``TYPE`` is the coercion authority
     for ``VALUE`` (stored as text — a value may be categorical); ``MIN``/``MAX`` are numeric
-    safety bounds (Number columns). ``SERVICE`` links the service a service-param configures.
+    safety bounds (Number columns). A param has a **polymorphic owner** — at most one of
+    ``SERVICE``/``HARDWARE``/``UNIT`` set (0 = a global param); the client + materialiser
+    enforce ≤1 fail-loud since NocoDB can't.
     """
 
     ID = "Id"
@@ -97,13 +100,38 @@ class ConfigParamColumns:
     LABEL = "label"            # human display name
     TYPE = "type"              # SingleSelect — real/int/bool/categorical/vector/list (coercion authority)
     SCOPE = "scope"            # SingleSelect — knob/editable/constant/safety (editability/nature)
-    VALUE = "value"            # text — the seed-default runtime value (coerced per TYPE by the consumer)
+    VALUE = "value"            # text — seed-default value; preserved for knob/editable, re-seeded for constant/safety
     OPTIONS = "options"        # LongText (JSON) — allowed values for categoricals (nullable)
     MIN = "min"                # Number — sanity lower bound (rtde's gate-feeding safety params); nullable
     MAX = "max"                # Number — sanity upper bound; nullable
-    UNIT = "unit"              # text — physical unit (nullable)
+    UNIT = "unit"              # text — physical unit of measure (nullable; e.g. "mm", "m/s")
     DESCRIPTION = "description"  # text
-    SERVICE = "service"        # LinkToAnotherRecord -> services (nullable; set for service params)
+    # Polymorphic owner — nullable LTARs, AT MOST ONE set (0 = global). See PARAM_OWNER_COLUMNS.
+    SERVICE = "service"        # LinkToAnotherRecord -> services (nullable)
+    HARDWARE = "hardware"      # LinkToAnotherRecord -> hardware (nullable)
+    UNIT_OWNER = "unit_owner"  # LinkToAnotherRecord -> units (nullable; distinct from UNIT = measure)
+
+
+# The polymorphic-owner link columns on `params`, in resolution order. Single home for "what
+# can own a param"; the ≤1-non-null invariant is asserted against this set (0 = global).
+PARAM_OWNER_COLUMNS: tuple[str, ...] = (
+    ConfigParamColumns.SERVICE,
+    ConfigParamColumns.HARDWARE,
+    ConfigParamColumns.UNIT_OWNER,
+)
+
+
+class HardwareColumns:
+    """Columns on the `hardware` table — physical device identity (the param link-target).
+
+    One row per physical device; *identity only* — a device's variable physics are `params`
+    rows linked to it. Absorbs the former ``robots`` registry. ``NAME`` is the key.
+    """
+
+    ID = "Id"
+    NAME = "name"              # unique device identity
+    TYPE = "type"              # SingleSelect — robot / tool / sensor
+    KIND = "kind"              # text — model/class (UR10e / WASPclay / Gocator / …)
 
 
 class ServiceColumns:
@@ -115,6 +143,7 @@ class ServiceColumns:
     KIND = "kind"              # text — service category (e.g. sensor / actuator)
     REQUIRES = "requires"      # LinkToAnotherRecord -> services (SELF m2m — dependencies)
     DASHBOARD = "dashboard"    # LongText (JSON) — dashboard config
+    HARDWARE = "hardware"      # LinkToAnotherRecord -> hardware (nullable; a sensor service's device)
 
 
 class UseCaseColumns:
@@ -127,17 +156,17 @@ class UseCaseColumns:
 
 
 class UnitColumns:
-    """Columns on the `units` table — this rig's hardware units (one row per unit).
+    """Columns on the `units` table — rig assemblies (one row per unit), composed of hardware.
 
-    Per-rig hardware param *values* (home_joints, tool_offset, …) live in `params`, not
-    here; a unit row is the hardware identity + its sensors. ``ROLE`` is the unit key.
+    A unit is a named assembly (printer / scanner) referencing its `hardware` devices; the
+    devices carry their own physics as linked `params`. ``ROLE`` is the unit key.
     """
 
     ID = "Id"
     ROLE = "role"              # unique unit role (e.g. printer / scanner)
-    ROBOT = "robot"            # text — robot model/identity
-    TOOL = "tool"              # text — mounted tool
-    SENSORS = "sensors"        # LinkToAnotherRecord -> services (the unit's sensor services)
+    ROBOT = "robot"            # LinkToAnotherRecord -> hardware (the unit's robot device)
+    TOOL = "tool"              # LinkToAnotherRecord -> hardware (the unit's mounted tool)
+    SENSORS = "sensors"        # LinkToAnotherRecord -> hardware (the unit's sensor devices, m2m)
 
 
 class DimPositionColumns:
@@ -245,9 +274,24 @@ class ConfigType(StrEnum):
 class ConfigScope(StrEnum):
     """A `params` definition's editability/nature — a SingleSelect column.
 
-    Per-rig hardware is the `units` table, not a scope value."""
+    Tunable scopes (`KNOB`/`EDITABLE`) are runtime-authoritative (value-preserving upsert);
+    non-tunable (`CONSTANT`/`SAFETY`) are seed-authoritative (re-seed overwrites — they are
+    config-as-code, not runtime values). Per-rig hardware is the `units` table, not a scope."""
 
     KNOB = "knob"            # tunable per experiment
     EDITABLE = "editable"    # user-editable default
-    CONSTANT = "constant"    # read-only
-    SAFETY = "safety"        # safety bound (gate-feeding)
+    CONSTANT = "constant"    # structural constant (seed-authoritative)
+    SAFETY = "safety"        # safety bound (seed-authoritative)
+
+
+# Scopes whose value the seed owns — re-seed OVERWRITES (vs tunable scopes, preserved). Single
+# home for the value-authority split (Refinement A).
+SEED_AUTHORITATIVE_SCOPES: frozenset[str] = frozenset({ConfigScope.CONSTANT, ConfigScope.SAFETY})
+
+
+class HardwareType(StrEnum):
+    """The `hardware.type` SingleSelect — what class of physical device a row is."""
+
+    ROBOT = "robot"
+    TOOL = "tool"
+    SENSOR = "sensor"

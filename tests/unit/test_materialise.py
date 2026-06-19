@@ -1,12 +1,14 @@
-"""Tests for the config-catalog materialiser (sectioned seed → catalog, value-preserving).
+"""Tests for the config-catalog materialiser — full model end-to-end.
 
-End-to-end through provision → link resolution → materialise, so the LTAR wiring
-(services.requires self-link, use_case→services, unit→sensors, param→service) is exercised
-against the fake the same way the data-stack hook runs it on stack-up."""
+Through provision → link resolution → materialise, exercising the hardware identity table,
+the polymorphic param owner (service/hardware/unit), units→hardware composition,
+services→hardware, and the scope-aware value authority — the same way the data-stack hook
+runs it on stack-up."""
 import json
 
 from pred_fab_nocodb.client import _resolve_link_field_ids
 from pred_fab_nocodb.config_params import ConfigParamsClient
+from pred_fab_nocodb.hardware import HardwareClient
 from pred_fab_nocodb.materialise import load_seed, materialise_config_catalog
 from pred_fab_nocodb.provision import provision_config_catalog
 from pred_fab_nocodb.schema import ConfigParamColumns, Tables
@@ -14,24 +16,32 @@ from pred_fab_nocodb.services import ServicesClient
 from pred_fab_nocodb.units import UnitsClient
 from pred_fab_nocodb.use_cases import UseCasesClient
 
-_CATALOG = (Tables.PARAMS, Tables.SERVICES, Tables.USE_CASES, Tables.UNITS)
+_CATALOG = (Tables.PARAMS, Tables.SERVICES, Tables.USE_CASES, Tables.UNITS, Tables.HARDWARE)
 
 _SEED = {
+    "hardware": [
+        {"name": "UR10e", "type": "robot", "kind": "UR10e"},
+        {"name": "WASPclay", "type": "tool", "kind": "WASPclay"},
+        {"name": "Gocator", "type": "sensor", "kind": "Gocator2530"},
+    ],
     "services": [
         {"name": "extruder", "kind": "actuator", "enabled": True},
-        {"name": "camera", "kind": "sensor", "requires": ["extruder"], "dashboard": {"panel": "cam"}},
+        {"name": "scan", "kind": "sensor", "requires": ["extruder"], "dashboard": {"panel": "scan"},
+         "hardware": "Gocator"},
     ],
-    "use_cases": [{"name": "print", "description": "layerwise", "services": ["extruder", "camera"]}],
-    "units": [{"role": "printer", "robot": "UR10e", "tool": "wasp", "sensors": ["camera"]}],
+    "use_cases": [{"name": "print", "description": "layerwise", "services": ["extruder", "scan"]}],
+    "units": [{"role": "printer", "robot": "UR10e", "tool": "WASPclay", "sensors": ["Gocator"]}],
     "params": [
         {"code": "fab_speed", "value": 0.05, "type": "real", "scope": "knob", "service": "extruder"},
+        {"code": "flex_deg", "value": 1.5, "type": "real", "scope": "constant", "hardware": "UR10e"},
+        {"code": "build_plate", "value": [0, 0], "type": "vector", "scope": "constant", "unit": "printer"},
         {"code": "mode", "value": "clay", "type": "categorical", "options": ["clay", "concrete"]},
     ],
 }
 
 
 def _clients(fake_http):
-    """Provision the catalog, resolve link fields, return the four wired clients."""
+    """Provision the catalog, resolve link fields, return the five wired clients."""
     provision_config_catalog(fake_http, base_id="b1")
     ids = {t: t for t in _CATALOG}                       # title == id (test convention)
     links, _ = _resolve_link_field_ids(fake_http, ids)
@@ -40,35 +50,43 @@ def _clients(fake_http):
         "services": ServicesClient(fake_http, "b1", ids[Tables.SERVICES], link_field_ids=links.get(Tables.SERVICES, {})),
         "use_cases": UseCasesClient(fake_http, "b1", ids[Tables.USE_CASES], link_field_ids=links.get(Tables.USE_CASES, {})),
         "units": UnitsClient(fake_http, "b1", ids[Tables.UNITS], link_field_ids=links.get(Tables.UNITS, {})),
+        "hardware": HardwareClient(fake_http, "b1", ids[Tables.HARDWARE], link_field_ids=links.get(Tables.HARDWARE, {})),
     }
 
 
 def test_materialise_seeds_all_sections_and_links(fake_http):
     cl = _clients(fake_http)
     counts = materialise_config_catalog(seed=_SEED, **cl)
-    assert counts == {"services": 2, "use_cases": 1, "units": 1, "params": 2}
+    assert counts == {"hardware": 3, "services": 2, "use_cases": 1, "units": 1, "params": 4}
 
-    cam = cl["services"].get_by_name("camera")
-    assert cam.kind == "sensor" and cam.requires == ["extruder"] and cam.dashboard == {"panel": "cam"}
-    assert set(cl["use_cases"].get_by_name("print").services) == {"extruder", "camera"}
-    assert cl["units"].get_by_role("printer").sensors == ["camera"]
-    fab = cl["params"].get_by_code("fab_speed")
-    assert fab.service == "extruder" and fab.coerced == 0.05
-    assert cl["params"].get_by_code("mode").options == ["clay", "concrete"]
+    # service → its hardware device
+    assert cl["services"].get_by_name("scan").hardware == "Gocator"
+    # unit composed of hardware devices
+    printer = cl["units"].get_by_role("printer")
+    assert printer.robot == "UR10e" and printer.tool == "WASPclay" and printer.sensors == ["Gocator"]
+    # polymorphic param owners resolve to the right (kind, name)
+    fab = cl["params"].get_by_code("fab_speed").owner
+    assert fab is not None and (fab.kind, fab.name) == ("service", "extruder")
+    flex = cl["params"].get_by_code("flex_deg").owner
+    assert flex is not None and (flex.kind, flex.name) == ("hardware", "UR10e")
+    plate = cl["params"].get_by_code("build_plate").owner
+    assert plate is not None and (plate.kind, plate.name) == ("unit", "printer")
+    assert cl["params"].get_by_code("mode").owner is None   # global param (no owner)
 
 
-def test_materialise_value_preserving_on_rerun(fake_http):
+def test_scope_aware_value_authority_on_rerun(fake_http):
     cl = _clients(fake_http)
     materialise_config_catalog(seed=_SEED, **cl)
 
-    # Runtime edit of a param value, then re-run the materialiser (the every-`up` hook).
-    row = next(r for r in fake_http.get_records(Tables.PARAMS) if r.get("code") == "fab_speed")
-    fake_http.records_update(Tables.PARAMS, {ConfigParamColumns.ID: row["Id"],
-                                             ConfigParamColumns.VALUE: "0.11"})
-    materialise_config_catalog(seed=_SEED, **cl)
+    # Runtime edits in NocoDB: a knob value AND a constant value.
+    for code, new in [("fab_speed", "0.11"), ("flex_deg", "9.9")]:
+        row = next(r for r in fake_http.get_records(Tables.PARAMS) if r.get("code") == code)
+        fake_http.records_update(Tables.PARAMS, {ConfigParamColumns.ID: row["Id"], ConfigParamColumns.VALUE: new})
+    materialise_config_catalog(seed=_SEED, **cl)   # re-run the stack-up hook
 
-    assert cl["params"].get_by_code("fab_speed").value == "0.11"   # runtime value preserved
-    assert len(fake_http.get_records(Tables.PARAMS)) == 2          # no duplicates
+    assert cl["params"].get_by_code("fab_speed").value == "0.11"   # knob: runtime preserved
+    assert cl["params"].get_by_code("flex_deg").coerced == 1.5     # constant: seed re-asserted (overwrite)
+    assert len(fake_http.get_records(Tables.PARAMS)) == 4          # no duplicates
 
 
 def test_load_seed_bare_list_is_params(tmp_path):
@@ -80,6 +98,6 @@ def test_load_seed_bare_list_is_params(tmp_path):
 
 def test_load_seed_sectioned(tmp_path):
     path = tmp_path / "seed.json"
-    seed = {"services": [{"name": "x"}], "params": [{"code": "a", "value": 1, "type": "int"}]}
+    seed = {"hardware": [{"name": "x", "type": "robot"}], "params": [{"code": "a", "value": 1, "type": "int"}]}
     path.write_text(json.dumps(seed))
     assert load_seed(str(path)) == seed

@@ -101,6 +101,35 @@ def test_first_upsert_writes_the_seed_default(fake_http):
     assert c.get_by_code("layer_h").value == "2.0"   # seed default written on creation
 
 
+def test_constant_scope_is_seed_authoritative(fake_http):
+    """`constant`/`safety` are config-as-code: a re-seed OVERWRITES (unlike tunable scopes)."""
+    c = _client(fake_http)
+    c.upsert(code="flex_deg", value=1.5, value_type=ConfigType.REAL, scope="constant")
+
+    # Simulate a runtime edit of the constant in NocoDB.
+    row = next(r for r in fake_http.get_records("params") if r.get("code") == "flex_deg")
+    fake_http.records_update("params", {ConfigParamColumns.ID: row["Id"], ConfigParamColumns.VALUE: "9.9"})
+
+    # Re-seed: a constant is seed-authoritative → the seed value wins (vs. preserved for knobs).
+    c.upsert(code="flex_deg", value=1.5, value_type=ConfigType.REAL, scope="constant")
+    assert c.get_by_code("flex_deg").coerced == 1.5
+
+
+# ===== polymorphic owner invariant (≤1, fail-loud) =====
+
+def test_two_owners_fail_loud(fake_http):
+    """NocoDB can't enforce ≤1 owner across nullable LTARs — the client does, fail-loud."""
+    c = _client(fake_http)
+    with pytest.raises(ValidationError):
+        c.upsert(code="x", value=1, value_type=ConfigType.INT, service_id=1, hardware_id=2)
+
+
+def test_owner_property_resolves_to_none_when_global(fake_http):
+    c = _client(fake_http)
+    c.upsert(code="mode", value="clay", value_type=ConfigType.CATEGORICAL)
+    assert c.get_by_code("mode").owner is None   # no owner link set = global param
+
+
 # ===== coerce_value (the single raw→typed authority) =====
 
 def test_coerce_value_by_type():

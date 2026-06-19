@@ -5,10 +5,12 @@ from .config_params import (
     ConfigParam,
     ConfigScope,
     ConfigType,
+    ParamOwner,
     coerce_value,
 )
 from .datasets import Dataset
 from .dim_positions import DimPosition
+from .hardware import Hardware
 from .errors import (
     ConflictError,
     NocoDBError,
@@ -18,7 +20,7 @@ from .errors import (
 )
 from .events import ParameterUpdateEvent
 from .experiments import Experiment
-from .schema import Purpose, Status, Strategy
+from .schema import HardwareType, Purpose, Status, Strategy
 from .schema_validator import SchemaValidator
 from .services import Service
 from .studies import Study
@@ -45,10 +47,13 @@ __all__ = [
     "ConfigParam",
     "ConfigType",
     "ConfigScope",
+    "ParamOwner",
     "coerce_value",
     "Service",
     "UseCase",
     "Unit",
+    "Hardware",
+    "HardwareType",
     "Status",
     "Strategy",
     "Purpose",

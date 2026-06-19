@@ -17,6 +17,7 @@ from .schema import (
     ParamColumns,
     Tables,
 )
+from .hardware import HardwareClient
 from .schema_validator import SchemaValidator
 from .services import ServicesClient
 from .studies import StudiesClient
@@ -134,7 +135,7 @@ class NocoDBClient:
         # their link-field ids over the subset that exists in this base.
         _cat_ids = {
             t: _all_ids[t] for t in
-            (Tables.PARAMS, Tables.SERVICES, Tables.USE_CASES, Tables.UNITS)
+            (Tables.PARAMS, Tables.SERVICES, Tables.USE_CASES, Tables.UNITS, Tables.HARDWARE)
             if _all_ids.get(t)
         }
         _cat_links, _ = _resolve_link_field_ids(self._http, _cat_ids) if _cat_ids else ({}, {})
@@ -157,6 +158,11 @@ class NocoDBClient:
             UnitsClient(self._http, base_id, _cat_ids[Tables.UNITS],
                         link_field_ids=_cat_links.get(Tables.UNITS, {}))
             if Tables.UNITS in _cat_ids else None
+        )
+        self.hardware: HardwareClient | None = (
+            HardwareClient(self._http, base_id, _cat_ids[Tables.HARDWARE],
+                           link_field_ids=_cat_links.get(Tables.HARDWARE, {}))
+            if Tables.HARDWARE in _cat_ids else None
         )
 
         # Value clients — share `dim_positions` so the cache benefits all writes

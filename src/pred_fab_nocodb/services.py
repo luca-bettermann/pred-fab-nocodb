@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ._base import _BaseTableClient
-from ._rows import _parse_json_dict, _resolve_link_displays, _resolve_link_ids
+from ._rows import _parse_json_dict, _resolve_link_display, _resolve_link_displays, _resolve_link_ids, _resolve_link_id
 from .errors import NotFoundError
-from .schema import ServiceColumns
+from .schema import HardwareColumns, ServiceColumns
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,8 @@ class Service:
     requires: list[str] = field(default_factory=list)       # required service names
     requires_ids: list[int] = field(default_factory=list)   # required service ids
     dashboard: Optional[dict[str, Any]] = None
+    hardware: Optional[str] = None                          # the device this service drives (sensors)
+    hardware_id: Optional[int] = None
 
 
 class ServicesClient(_BaseTableClient):
@@ -55,11 +57,12 @@ class ServicesClient(_BaseTableClient):
         kind: Optional[str] = None,
         dashboard: Optional[dict[str, Any]] = None,
         requires_ids: Optional[list[int]] = None,
+        hardware_id: Optional[int] = None,
     ) -> Service:
-        """Create or update a service row, keyed by ``name``; re-assert its ``requires`` links.
+        """Create or update a service row, keyed by ``name``; re-assert its links.
 
-        ``requires_ids`` are resolved service ids (the caller maps names → ids); they must
-        already exist. Linking is additive/idempotent — re-running does not duplicate."""
+        ``requires_ids`` are resolved service ids; ``hardware_id`` the device a sensor service
+        drives (both resolved by the caller). Linking is additive/idempotent."""
         body: dict[str, Any] = {
             ServiceColumns.NAME: name,
             ServiceColumns.ENABLED: enabled,
@@ -78,6 +81,9 @@ class ServicesClient(_BaseTableClient):
         service = self.get_by_name(name)
         if requires_ids:
             self._link(ServiceColumns.REQUIRES, service.id, requires_ids)
+        if hardware_id is not None:
+            self._link(ServiceColumns.HARDWARE, service.id, hardware_id)
+        if requires_ids or hardware_id is not None:
             service = self.get_by_name(name)
         return service
 
@@ -91,4 +97,6 @@ def _row_to_service(row: dict[str, Any]) -> Service:
         requires=_resolve_link_displays(row.get(ServiceColumns.REQUIRES), ServiceColumns.NAME),
         requires_ids=_resolve_link_ids(row.get(ServiceColumns.REQUIRES)),
         dashboard=_parse_json_dict(row.get(ServiceColumns.DASHBOARD)),
+        hardware=_resolve_link_display(row.get(ServiceColumns.HARDWARE), HardwareColumns.NAME),
+        hardware_id=_resolve_link_id(row.get(ServiceColumns.HARDWARE)),
     )

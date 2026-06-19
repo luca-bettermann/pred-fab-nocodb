@@ -32,13 +32,15 @@ from .schema import (
     ConfigParamColumns,
     ConfigScope,
     ConfigType,
+    HardwareColumns,
+    HardwareType,
     ServiceColumns,
     Tables,
     UnitColumns,
     UseCaseColumns,
 )
 
-_P, _S, _U, _UC = ConfigParamColumns, ServiceColumns, UnitColumns, UseCaseColumns
+_P, _S, _U, _UC, _H = ConfigParamColumns, ServiceColumns, UnitColumns, UseCaseColumns, HardwareColumns
 
 
 def _text(title: str) -> dict[str, Any]:
@@ -91,21 +93,31 @@ def _scalar_columns() -> dict[str, list[dict[str, Any]]]:
             _text(_UC.NAME), _longtext(_UC.DESCRIPTION),
         ],
         Tables.UNITS: [
-            _text(_U.ROLE), _text(_U.ROBOT), _text(_U.TOOL),
+            _text(_U.ROLE),  # robot/tool/sensors are LTARs → hardware, added in pass 2
+        ],
+        Tables.HARDWARE: [
+            _text(_H.NAME), _single_select(_H.TYPE, HardwareType), _text(_H.KIND),
         ],
     }
 
 
 def _link_specs() -> list[tuple[str, str, str, str]]:
-    """LTAR links as ``(table, column, related_table, link_type)``. All target `services`."""
-    # All ``mm``: the live base models every link (even logically single ones) as an m2m
-    # junction table, and a single-id link write against an m2m relation is the proven path.
-    # A param's ``service`` is linked single (one service) over an m2m column.
+    """LTAR links as ``(table, column, related_table, link_type)``.
+
+    All ``mm``: the live base models every link (even logically single ones) as an m2m
+    junction, and a single-id write against an m2m relation is the proven path (so single
+    owners — `params.service`/`hardware`/`unit_owner`, `units.robot`/`tool`, `services.hardware`
+    — are linked one over an m2m column)."""
     return [
         (Tables.SERVICES, _S.REQUIRES, Tables.SERVICES, "mm"),   # self dependency graph
+        (Tables.SERVICES, _S.HARDWARE, Tables.HARDWARE, "mm"),   # a sensor service's device
         (Tables.USE_CASES, _UC.SERVICES, Tables.SERVICES, "mm"),
-        (Tables.UNITS, _U.SENSORS, Tables.SERVICES, "mm"),
-        (Tables.PARAMS, _P.SERVICE, Tables.SERVICES, "mm"),
+        (Tables.UNITS, _U.ROBOT, Tables.HARDWARE, "mm"),
+        (Tables.UNITS, _U.TOOL, Tables.HARDWARE, "mm"),
+        (Tables.UNITS, _U.SENSORS, Tables.HARDWARE, "mm"),
+        (Tables.PARAMS, _P.SERVICE, Tables.SERVICES, "mm"),      # polymorphic owner: ≤1 set
+        (Tables.PARAMS, _P.HARDWARE, Tables.HARDWARE, "mm"),
+        (Tables.PARAMS, _P.UNIT_OWNER, Tables.UNITS, "mm"),
     ]
 
 
